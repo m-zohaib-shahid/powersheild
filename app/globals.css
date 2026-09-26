@@ -1,0 +1,78 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    /* Deep Grid Slate: solid base + faint utility-grid overlay + top glow */
+    background-color: #0f172a;
+    background-image:
+      radial-gradient(
+        1100px 520px at 50% -180px,
+        rgba(5, 150, 105, 0.12),
+        transparent 65%
+      ),
+      linear-gradient(
+        to right,
+        rgba(148, 163, 184, 0.05) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        to bottom,
+        rgba(148, 163, 184, 0.05) 1px,
+        transparent 1px
+      );
+    background-size: 100% 100%, 44px 44px, 44px 44px;
+    background-attachment: fixed;
+  }
+
+  ::selection {
+    background: rgba(5, 150, 105, 0.4);
+    color: #f8fafc;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #0f172a;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #334155;
+    border: 2px solid #0f172a;
+    border-radius: 8px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #475569;
+  }
+}
+
+@layer components {
+  /* Elevated Slate card surface shared across the dashboard */
+  .card-surface {
+    @apply rounded-2xl border border-slate-700 bg-slate-800/80 shadow-card backdrop-blur-xl;
+  }
+}
+
+@layer utilities {
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}

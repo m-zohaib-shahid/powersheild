@@ -1,0 +1,113 @@
+import type { LucideIcon } from "lucide-react";
+
+/**
+ * Zone classification for cumulative consumption inside a billing cycle.
+ * safe     -> fewer than 160 units
+ * warning  -> 160 to 179 units
+ * critical -> 180 units or more
+ */
+export type ConsumptionZone = "safe" | "warning" | "critical";
+
+/** Accent palette tokens mapped to the LESCO-inspired theme. */
+export type ZoneTone = "emerald" | "amber" | "red";
+
+/** Presentational metadata for a consumption zone (colors + labels). */
+export interface ZoneMeta {
+  zone: ConsumptionZone;
+  /** Short badge label, e.g. "Safe". */
+  label: string;
+  /** Long badge label used inside the gauge, e.g. "Safe zone". */
+  fullLabel: string;
+  /** Hex color for SVG strokes/fills (exact design-system accent). */
+  hex: string;
+  /** Tailwind class for readable foreground text. */
+  text: string;
+  /** Tailwind class for tinted surfaces. */
+  bg: string;
+  /** Tailwind class for tinted borders. */
+  border: string;
+  /** Human readable unit range, e.g. "160 - 179 units". */
+  range: string;
+}
+
+export interface GaugeMeterProps {
+  /** Units consumed so far in the billing cycle. */
+  consumedUnits: number;
+  /** Slab target limit for the cycle (defaults to 200 in the dashboard). */
+  targetLimit: number;
+  /** Optional class merged onto the component root. */
+  className?: string;
+}
+
+export type KpiTone = ZoneTone | "sky";
+
+/** A single stat tile rendered by `KpiCards`. */
+export interface KpiCardItem {
+  id: string;
+  label: string;
+  value: string;
+  unit: string;
+  caption: string;
+  icon: LucideIcon;
+  tone: KpiTone;
+}
+
+export interface KpiCardsProps {
+  items?: KpiCardItem[];
+  className?: string;
+}
+
+/** A historical meter submission rendered by `RecentLogs`. */
+export interface MeterReadingEntry {
+  id: string;
+  /** ISO calendar date in YYYY-MM-DD format. */
+  date: string;
+  /** Cumulative meter index at the time of the reading. */
+  reading: number;
+  /** Units burned since the previous reading. */
+  delta: number;
+  /** Status badge derived from the daily delta. */
+  zone: ConsumptionZone;
+}
+
+export interface RecentLogsProps {
+  entries?: MeterReadingEntry[];
+  className?: string;
+}
+
+export interface HeaderUser {
+  name: string;
+  initials: string;
+}
+
+export interface HeaderProps {
+  user?: HeaderUser;
+  className?: string;
+}
+
+/** Payload produced when a user saves a reading from the modal. */
+export interface ReadingSubmission {
+  meterValue: number;
+  readingDate: string;
+  source: "manual" | "ocr";
+}
+
+export interface AddReadingModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  /** Latest meter index; readings below this value fail validation. */
+  previousReading?: number;
+  /** ISO date of the latest reading, shown as helper context. */
+  previousReadingDate?: string;
+  onSubmit?: (submission: ReadingSubmission) => void;
+}
+
+/** Static dashboard snapshot powering the mock UI. */
+export interface DashboardSnapshot {
+  consumedUnits: number;
+  targetLimit: number;
+  cycleLabel: string;
+  cycleEndLabel: string;
+  daysLeft: number;
+  lastUpdated: string;
+}

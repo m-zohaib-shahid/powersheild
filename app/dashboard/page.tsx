@@ -53,7 +53,8 @@ export default function DashboardPage() {
     <div className="relative min-h-screen">
       <Header />
 
-      <main className="mx-auto w-full max-w-6xl px-4 pb-32 pt-6 sm:px-6 md:pb-14 lg:px-8">
+      {/* pb-32 keeps the fixed mobile FAB clear of the last recent-log entry */}
+      <main className="mx-auto w-full max-w-6xl px-4 pb-32 pt-6 sm:px-6 md:pb-16 lg:px-8">
         {/* Page heading + desktop action */}
         <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div className="min-w-0">

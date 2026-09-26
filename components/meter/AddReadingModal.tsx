@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { AnimatePresence, motion } from "framer-motion";
@@ -14,9 +14,11 @@ import {
   X,
 } from "lucide-react";
 
+import OcrScanner from "@/components/meter/OcrScanner";
 import type { AddReadingModalProps } from "@/lib/types";
 import { MOCK_READINGS } from "@/lib/mock-data";
 import { ZONE_META, getConsumptionZone } from "@/lib/tariff";
+import { createReadingFormSchema, extractFieldError } from "@/lib/validation";
 import { cn, formatReadingDate, toLocalDateString } from "@/lib/utils";
 
 const TABS = [
@@ -37,9 +39,10 @@ export default function AddReadingModal({
   const [activeTab, setActiveTab] = useState<TabId>("manual");
   const [meterValue, setMeterValue] = useState("");
   const [readingDate, setReadingDate] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [dateError, setDateError] = useState<string | null>(null);
+  const [touchedMeter, setTouchedMeter] = useState(false);
+  const [touchedDate, setTouchedDate] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
+  const [cameraEnabled, setCameraEnabled] = useState(true);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const baseId = useId();
@@ -48,6 +51,25 @@ export default function AddReadingModal({
   const panelId = (id: TabId) => `${baseId}-panel-${id}`;
 
   const previousMeta = ZONE_META[getConsumptionZone(previousReading)];
+
+  /* Strict Zod validation: reading_value >= last_reading (lib/validation). */
+  const formSchema = useMemo(
+    () => createReadingFormSchema(previousReading),
+    [previousReading],
+  );
+  const formParse = formSchema.safeParse({ meterValue, readingDate });
+  const formIssues = formParse.success ? [] : formParse.error.issues;
+  const meterIssue = extractFieldError(formIssues, "meterValue");
+  const dateIssue = extractFieldError(formIssues, "readingDate");
+  const isFormValid = formParse.success;
+
+  const showMeterError =
+    meterIssue !== null && (touchedMeter || meterValue.trim() !== "");
+  const showDateError = dateIssue !== null && touchedDate;
+
+  /* The camera runs only while the OCR tab is visible and modal open —
+     flipping this to false triggers OcrScanner's track cleanup instantly. */
+  const isOcrActive = isOpen && activeTab === "ocr" && cameraEnabled;
 
   /* Render the portal only after hydration (document is client-only). */
   useEffect(() => {
@@ -79,51 +101,25 @@ export default function AddReadingModal({
     setActiveTab("manual");
     setMeterValue("");
     setReadingDate(toLocalDateString());
-    setError(null);
-    setDateError(null);
+    setTouchedMeter(false);
+    setTouchedDate(false);
     setFileName(null);
+    setCameraEnabled(true);
 
     const focusTimer = window.setTimeout(() => inputRef.current?.focus(), 380);
     return () => window.clearTimeout(focusTimer);
   }, [isOpen]);
 
-  function validateMeterValue(raw: string): string | null {
-    const trimmed = raw.trim();
-    if (trimmed === "") return "Enter the current meter reading to continue.";
-    const parsed = Number(trimmed);
-    if (Number.isNaN(parsed)) return "Meter reading must be a valid number.";
-    if (parsed <= 0) return "Meter reading must be greater than zero.";
-    if (parsed < previousReading) {
-      return `Reading cannot be lower than your previous reading of ${previousReading.toFixed(1)} units.`;
-    }
-    return null;
-  }
+  function handleManualSubmit(): void {
+    setTouchedMeter(true);
+    setTouchedDate(true);
 
-  function handleValueChange(next: string) {
-    setMeterValue(next);
-    if (error) setError(validateMeterValue(next));
-  }
-
-  function handleValueBlur() {
-    if (meterValue.trim() !== "") setError(validateMeterValue(meterValue));
-  }
-
-  function handleManualSubmit() {
-    const validationError = validateMeterValue(meterValue);
-    if (validationError) {
-      setError(validationError);
-      inputRef.current?.focus();
-      return;
-    }
-
-    if (!readingDate) {
-      setDateError("Choose the date this reading was taken.");
-      return;
-    }
+    const parsed = formSchema.safeParse({ meterValue, readingDate });
+    if (!parsed.success) return;
 
     onSubmit?.({
-      meterValue: Number(meterValue),
-      readingDate,
+      meterValue: Number(parsed.data.meterValue),
+      readingDate: parsed.data.readingDate,
       source: "manual",
     });
     onClose();
@@ -267,15 +263,17 @@ export default function AddReadingModal({
                       autoComplete="off"
                       placeholder="e.g. 148.5"
                       value={meterValue}
-                      onChange={(event) => handleValueChange(event.target.value)}
-                      onBlur={handleValueBlur}
-                      aria-invalid={Boolean(error)}
+                      onChange={(event) => setMeterValue(event.target.value)}
+                      onBlur={() => setTouchedMeter(true)}
+                      aria-invalid={showMeterError}
                       aria-describedby={
-                        error ? `${baseId}-meter-error` : `${baseId}-meter-hint`
+                        showMeterError
+                          ? `${baseId}-meter-error`
+                          : `${baseId}-meter-hint`
                       }
                       className={cn(
                         "w-full rounded-xl border bg-slate-900/70 px-4 py-3 pr-16 text-base text-white outline-none transition placeholder:text-slate-500 focus:ring-2",
-                        error
+                        showMeterError
                           ? "border-red-600/60 focus:border-red-500 focus:ring-red-600/25"
                           : "border-slate-700 focus:border-emerald-600 focus:ring-emerald-600/25",
                       )}
@@ -299,7 +297,7 @@ export default function AddReadingModal({
 
                   {/* Validation error preview (value below previous reading) */}
                   <AnimatePresence initial={false}>
-                    {error && (
+                    {showMeterError && (
                       <motion.p
                         key="meter-error"
                         id={`${baseId}-meter-error`}
@@ -314,7 +312,7 @@ export default function AddReadingModal({
                           className="mt-0.5 h-4 w-4 shrink-0"
                           aria-hidden="true"
                         />
-                        <span>{error}</span>
+                        <span>{meterIssue}</span>
                       </motion.p>
                     )}
                   </AnimatePresence>
@@ -336,21 +334,22 @@ export default function AddReadingModal({
                     max={toLocalDateString()}
                     onChange={(event) => {
                       setReadingDate(event.target.value);
-                      if (dateError) setDateError(null);
+                      setTouchedDate(true);
                     }}
-                    aria-invalid={Boolean(dateError)}
+                    onBlur={() => setTouchedDate(true)}
+                    aria-invalid={showDateError}
                     aria-describedby={
-                      dateError ? `${baseId}-date-error` : undefined
+                      showDateError ? `${baseId}-date-error` : undefined
                     }
                     className={cn(
                       "w-full rounded-xl border bg-slate-900/70 px-4 py-3 text-base text-white outline-none transition focus:ring-2",
-                      dateError
+                      showDateError
                         ? "border-red-600/60 focus:border-red-500 focus:ring-red-600/25"
                         : "border-slate-700 focus:border-emerald-600 focus:ring-emerald-600/25",
                     )}
                   />
                   <AnimatePresence initial={false}>
-                    {dateError && (
+                    {showDateError && (
                       <motion.p
                         key="date-error"
                         id={`${baseId}-date-error`}
@@ -365,7 +364,7 @@ export default function AddReadingModal({
                           className="mt-0.5 h-4 w-4 shrink-0"
                           aria-hidden="true"
                         />
-                        <span>{dateError}</span>
+                        <span>{dateIssue}</span>
                       </motion.p>
                     )}
                   </AnimatePresence>
@@ -397,68 +396,27 @@ export default function AddReadingModal({
                 hidden={activeTab !== "ocr"}
                 className="space-y-4"
               >
-                {/* Camera viewfinder frame */}
-                <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl border-2 border-dashed border-slate-600 bg-slate-900/70">
-                  <span
-                    className="absolute left-3 top-3 h-6 w-6 rounded-tl-md border-l-2 border-t-2 border-emerald-400"
-                    aria-hidden="true"
-                  />
-                  <span
-                    className="absolute right-3 top-3 h-6 w-6 rounded-tr-md border-r-2 border-t-2 border-emerald-400"
-                    aria-hidden="true"
-                  />
-                  <span
-                    className="absolute bottom-3 left-3 h-6 w-6 rounded-bl-md border-b-2 border-l-2 border-emerald-400"
-                    aria-hidden="true"
-                  />
-                  <span
-                    className="absolute bottom-3 right-3 h-6 w-6 rounded-br-md border-b-2 border-r-2 border-emerald-400"
-                    aria-hidden="true"
-                  />
-
-                  {/* Sweeping scan beam */}
-                  <motion.span
-                    className="absolute inset-x-6 h-px bg-gradient-to-r from-transparent via-emerald-400 to-transparent"
-                    initial={{ top: "18%" }}
-                    animate={{ top: ["18%", "82%", "18%"] }}
-                    transition={{
-                      duration: 3.4,
-                      repeat: Infinity,
-                      ease: "easeInOut",
-                    }}
-                    aria-hidden="true"
-                  />
-
-                  <div className="flex h-full flex-col items-center justify-center gap-2 px-8 text-center">
-                    <span className="flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-700 bg-slate-800">
-                      <Camera
-                        className="h-6 w-6 text-emerald-400"
-                        aria-hidden="true"
-                      />
-                    </span>
-                    <p className="text-sm font-semibold text-white">
-                      Align the meter inside the frame
-                    </p>
-                    <p className="text-xs leading-relaxed text-slate-400">
-                      Fill the display with the digits for the best OCR
-                      accuracy.
-                    </p>
-                    <span className="mt-1 inline-flex items-center gap-1.5 rounded-full border border-amber-600/40 bg-amber-600/15 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-amber-400">
-                      <ScanLine className="h-3 w-3" aria-hidden="true" />
-                      OCR beta
-                    </span>
-                  </div>
-                </div>
+                {/* Live camera viewfinder — releases all tracks on close/tab switch */}
+                <OcrScanner
+                  isActive={isOcrActive}
+                  onCapture={(file) => setFileName(file.name)}
+                />
 
                 {/* Capture actions: live camera is staged for Phase 2 */}
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <button
                     type="button"
-                    disabled
-                    className="flex w-full cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-sm font-semibold text-slate-500 opacity-70"
+                    onClick={() => setCameraEnabled((value) => !value)}
+                    aria-pressed={cameraEnabled}
+                    className={cn(
+                      "flex w-full items-center justify-center gap-2 rounded-xl border bg-slate-800 px-4 py-3 text-sm font-semibold transition",
+                      cameraEnabled
+                        ? "border-emerald-600/50 text-emerald-400 hover:border-emerald-500 hover:text-emerald-300"
+                        : "border-slate-600 text-slate-200 hover:border-slate-500 hover:text-white",
+                    )}
                   >
                     <Camera className="h-4 w-4" aria-hidden="true" />
-                    Open Camera
+                    {cameraEnabled ? "Stop Camera" : "Open Camera"}
                   </button>
                   <label
                     htmlFor={`${baseId}-ocr-file`}
@@ -516,10 +474,27 @@ export default function AddReadingModal({
             {/* Sticky footer keeps the primary action reachable while scrolling */}
             {activeTab === "manual" && (
               <div className="shrink-0 border-t border-slate-700/70 bg-slate-800/95 px-4 py-4 backdrop-blur sm:px-6">
+                {!isFormValid && !showMeterError && !showDateError && (
+                  <p className="mb-2.5 text-center text-[11px] text-slate-500">
+                    Enter a reading of at least {previousReading.toFixed(1)}{" "}
+                    units to continue.
+                  </p>
+                )}
                 <button
                   type="button"
                   onClick={handleManualSubmit}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3.5 text-sm font-semibold text-white shadow-lg shadow-emerald-900/40 transition hover:bg-emerald-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 active:scale-[0.99]"
+                  disabled={!isFormValid}
+                  title={
+                    isFormValid
+                      ? undefined
+                      : "Fix the highlighted fields to save this reading"
+                  }
+                  className={cn(
+                    "flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3.5 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400",
+                    isFormValid
+                      ? "bg-emerald-600 text-white shadow-lg shadow-emerald-900/40 hover:bg-emerald-500 active:scale-[0.99]"
+                      : "cursor-not-allowed bg-slate-700 text-slate-400",
+                  )}
                 >
                   <Check className="h-4 w-4" aria-hidden="true" />
                   Save Reading

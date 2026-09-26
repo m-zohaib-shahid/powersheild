@@ -69,9 +69,13 @@ export default function RecentLogs({
                 </span>
 
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-white">
+                  <time
+                    dateTime={entry.date}
+                    suppressHydrationWarning
+                    className="block truncate text-sm font-semibold text-white"
+                  >
                     {formatReadingDate(entry.date)}
-                  </p>
+                  </time>
                   <p className="mt-0.5 truncate text-xs text-slate-400">
                     Meter reading{" "}
                     <span className="font-medium tabular-nums text-slate-300">

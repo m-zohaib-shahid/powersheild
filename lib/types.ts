@@ -102,6 +102,21 @@ export interface AddReadingModalProps {
   onSubmit?: (submission: ReadingSubmission) => void;
 }
 
+/**
+ * Props for the live camera OCR scanner component.
+ * `isActive` drives the webcam lifecycle: the stream starts only while the
+ * scanner is visible and every track is stopped the moment it becomes false
+ * (modal close / tab switch) or the component unmounts.
+ */
+export interface OcrScannerProps {
+  /** Whether the camera feed should be running right now. */
+  isActive: boolean;
+  /** Called with a snapshot file captured from the live video feed. */
+  onCapture?: (file: File) => void;
+  /** Optional class merged onto the viewfinder root element. */
+  className?: string;
+}
+
 /** Static dashboard snapshot powering the mock UI. */
 export interface DashboardSnapshot {
   consumedUnits: number;

@@ -13,15 +13,32 @@ export function toLocalDateString(date: Date = new Date()): string {
   return `${year}-${month}-${day}`;
 }
 
-/** Converts YYYY-MM-DD into a friendly "27 Sep 2026" label. */
+const MONTH_NAMES_SHORT = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+] as const;
+
+/**
+ * Converts YYYY-MM-DD into "27 Sep 2026" using fixed month names and plain
+ * integer math — no Date/Intl locale APIs — so server and client always emit
+ * the exact same string. This removes SSR hydration mismatches entirely
+ * (suppressed on the element as well for belt-and-suspenders safety).
+ */
 export function formatReadingDate(isoDate: string): string {
   const [year, month, day] = isoDate.split("-").map(Number);
-  if (!year || !month || !day) return isoDate;
-  return new Date(year, month - 1, day).toLocaleDateString("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
+  if (!year || !month || !day || month < 1 || month > 12) return isoDate;
+  const monthName = MONTH_NAMES_SHORT[month - 1];
+  return `${String(day).padStart(2, "0")} ${monthName} ${year}`;
 }
 
 /** Formats a unit count with a fixed number of decimals. */

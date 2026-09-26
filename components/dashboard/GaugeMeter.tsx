@@ -24,16 +24,23 @@ export default function GaugeMeter({
 
   const safeLimit = Math.max(targetLimit, 1);
   const rawRatio = consumedUnits / safeLimit;
-  const ratio = Math.min(Math.max(rawRatio, 0), 1);
-  const percent = Math.max(Math.round(rawRatio * 100), 0);
 
-  const zone = getConsumptionZone(consumedUnits);
+  /* Overfill protection: ring + percentage stay within the 0..100% range so
+     strokeDashoffset can never receive a negative value past 200 units. */
+  const ratio = Math.min(Math.max(rawRatio, 0), 1);
+  const percent = Math.min(Math.max(Math.round(rawRatio * 100), 0), 100);
+  const dashOffset = Math.max(CIRCUMFERENCE * (1 - ratio), 0);
+
+  const isOverLimit = consumedUnits > safeLimit;
+  const zone = isOverLimit ? "critical" : getConsumptionZone(consumedUnits);
   const meta = ZONE_META[zone];
   const remaining = safeLimit - consumedUnits;
 
   const accessibilityLabel = `${formatMeterValue(
     consumedUnits,
-  )} of ${safeLimit} units consumed, ${percent} percent of target, ${meta.fullLabel.toLowerCase()}`;
+  )} of ${safeLimit} units consumed, ${percent} percent of target, ${
+    isOverLimit ? "overlimit" : meta.fullLabel.toLowerCase()
+  }`;
 
   return (
     <div className={cn("flex flex-col items-center", className)}>
@@ -84,7 +91,7 @@ export default function GaugeMeter({
               strokeLinecap="round"
               strokeDasharray={CIRCUMFERENCE}
               initial={{ strokeDashoffset: CIRCUMFERENCE }}
-              animate={{ strokeDashoffset: CIRCUMFERENCE * (1 - ratio) }}
+              animate={{ strokeDashoffset: dashOffset }}
               transition={{
                 duration: prefersReducedMotion ? 0 : 1.4,
                 delay: prefersReducedMotion ? 0 : 0.2,
@@ -110,16 +117,22 @@ export default function GaugeMeter({
             </span>{" "}
             / {safeLimit} units
           </span>
-          <span
-            className={cn(
-              "mt-3 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider",
-              meta.bg,
-              meta.border,
-              meta.text,
-            )}
-          >
-            {meta.fullLabel}
-          </span>
+          {isOverLimit ? (
+            <span className="mt-3 rounded-full border border-red-600 bg-red-600 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-white shadow-md shadow-red-900/50">
+              OVERLIMIT
+            </span>
+          ) : (
+            <span
+              className={cn(
+                "mt-3 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider",
+                meta.bg,
+                meta.border,
+                meta.text,
+              )}
+            >
+              {meta.fullLabel}
+            </span>
+          )}
         </div>
       </div>
 

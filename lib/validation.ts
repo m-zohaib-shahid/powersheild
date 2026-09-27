@@ -1,10 +1,46 @@
 import { z } from "zod";
 
+/** Hard cap for a 6-digit electricity meter index (max 999999). */
+export const MAX_METER_VALUE = 999999;
+
+/** Maximum decimal places a meter reading may carry. */
+export const MAX_DECIMAL_PLACES = 2;
+
+/** Permissive intake pattern: digits with at most one decimal point. */
+export const METER_RAW_INPUT_PATTERN = /^\d*\.?\d*$/;
+
 /**
- * Plain decimal meter index: "142", "142.5" or ".5".
- * Rejects scientific notation, signs and trailing garbage ("1e3", "12abc").
+ * Final accepted shape: up to 6 integer digits plus an optional 1-2 digit
+ * decimal part. Letters and "+"/"-"/"e"/"E" can never match this pattern.
+ * A trailing "." is allowed while typing and caught by numeric refinements.
  */
-const PLAIN_NUMBER_PATTERN = /^(?:\d+\.?\d*|\.\d+)$/;
+export const METER_SHAPE_PATTERN = /^\d{0,6}(\.\d{0,2})?$/;
+
+/**
+ * Normalizes a raw keystroke/paste for the meter field.
+ *
+ * - Blocks "e", "E", "+", "-" and every other non-numeric character.
+ * - Rejects integer parts longer than 6 digits (hard cap 999999).
+ * - Truncates decimals to {@link MAX_DECIMAL_PLACES} places on paste.
+ *
+ * @returns the sanitized string, "" for cleared input, or `null` when the
+ *          change must be rejected (the field keeps its previous value).
+ */
+export function sanitizeMeterValue(raw: string): string | null {
+  if (raw === "") return "";
+  if (!METER_RAW_INPUT_PATTERN.test(raw)) return null;
+
+  const [integerPart = "", decimalPart] = raw.split(".");
+  if (integerPart.length > 6) return null;
+
+  const sanitized =
+    decimalPart !== undefined
+      ? `${integerPart}.${decimalPart.slice(0, MAX_DECIMAL_PLACES)}`
+      : integerPart;
+
+  if (Number(sanitized) > MAX_METER_VALUE) return null;
+  return sanitized;
+}
 
 /**
  * Builds the strict manual-entry schema for a given previous meter reading.
@@ -18,10 +54,17 @@ export function createReadingFormSchema(previousReading: number) {
       .string()
       .trim()
       .min(1, "Enter the current meter reading to continue.")
-      .regex(PLAIN_NUMBER_PATTERN, "Meter reading must be a valid number.")
+      .regex(
+        METER_SHAPE_PATTERN,
+        `Meter reading allows up to 6 digits and a maximum of ${MAX_DECIMAL_PLACES} decimal places.`,
+      )
       .refine(
-        (value) => Number(value) > 0,
+        (value) => Number.isFinite(Number(value)) && Number(value) > 0,
         "Meter reading must be greater than zero.",
+      )
+      .refine(
+        (value) => Number(value) <= MAX_METER_VALUE,
+        `Meter reading cannot exceed ${MAX_METER_VALUE}.`,
       )
       .refine(
         (value) => Number(value) >= previousReading,

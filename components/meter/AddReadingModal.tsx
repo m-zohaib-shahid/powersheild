@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { type ChangeEvent, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { AnimatePresence, motion } from "framer-motion";
@@ -18,7 +18,12 @@ import OcrScanner from "@/components/meter/OcrScanner";
 import type { AddReadingModalProps } from "@/lib/types";
 import { MOCK_READINGS } from "@/lib/mock-data";
 import { ZONE_META, getConsumptionZone } from "@/lib/tariff";
-import { createReadingFormSchema, extractFieldError } from "@/lib/validation";
+import {
+  MAX_METER_VALUE,
+  createReadingFormSchema,
+  extractFieldError,
+  sanitizeMeterValue,
+} from "@/lib/validation";
 import { cn, formatReadingDate, toLocalDateString } from "@/lib/utils";
 
 const TABS = [
@@ -76,12 +81,24 @@ export default function AddReadingModal({
     setMounted(true);
   }, []);
 
-  /* Escape closes the dialog; background scroll stays locked while open. */
+  /* Mirror the latest onClose in a ref so the global listener below is
+     registered once per open-state change (inline callbacks never churn it). */
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  /* Global Escape handler dismisses the overlay from anywhere on the page;
+     background scroll stays locked while open (symmetric cleanup). */
   useEffect(() => {
     if (!isOpen) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      /* Ignore IME composition keystrokes so native input flows survive. */
+      if (event.key === "Escape" && !event.isComposing) {
+        event.preventDefault();
+        onCloseRef.current();
+      }
     };
 
     const previousOverflow = document.body.style.overflow;
@@ -92,7 +109,7 @@ export default function AddReadingModal({
       document.body.style.overflow = previousOverflow;
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   /* Reset the form each time the modal opens and focus the numeric field. */
   useEffect(() => {
@@ -109,6 +126,17 @@ export default function AddReadingModal({
     const focusTimer = window.setTimeout(() => inputRef.current?.focus(), 380);
     return () => window.clearTimeout(focusTimer);
   }, [isOpen]);
+
+  /**
+   * Numeric input handler: rejects blocked characters ("e", "E", "+", "-",
+   * letters) and out-of-bounds values (>6 digits / >999999) by keeping the
+   * previous value; long decimals are truncated to 2 places automatically.
+   */
+  function handleMeterValueChange(event: ChangeEvent<HTMLInputElement>): void {
+    const sanitized = sanitizeMeterValue(event.target.value);
+    if (sanitized === null) return;
+    setMeterValue(sanitized);
+  }
 
   function handleManualSubmit(): void {
     setTouchedMeter(true);
@@ -130,8 +158,15 @@ export default function AddReadingModal({
   return createPortal(
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-6">
-          {/* Backdrop */}
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-6"
+          onPointerDown={(event) => {
+            /* Fallback outside-click: dismiss when the press lands on the
+               overlay container itself (the backdrop below covers the rest). */
+            if (event.target === event.currentTarget) onClose();
+          }}
+        >
+          {/* Backdrop — click outside the sheet dismisses the modal */}
           <motion.button
             type="button"
             aria-label="Close add reading dialog"
@@ -262,8 +297,12 @@ export default function AddReadingModal({
                       inputMode="decimal"
                       autoComplete="off"
                       placeholder="e.g. 148.5"
+                      min={0}
+                      max={MAX_METER_VALUE}
+                      maxLength={9}
+                      pattern="\d{0,6}(\.\d{0,2})?"
                       value={meterValue}
-                      onChange={(event) => setMeterValue(event.target.value)}
+                      onChange={handleMeterValueChange}
                       onBlur={() => setTouchedMeter(true)}
                       aria-invalid={showMeterError}
                       aria-describedby={

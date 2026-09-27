@@ -329,8 +329,12 @@ export async function getBillingCycleDay(
  * Persists the billing cycle day to `public.profiles` and revalidates the
  * dashboard so the 30-day window, burn rate and projections refresh instantly.
  *
- * The table holds a single shared profile row, so this upserts by the fixed
- * id and works for both signed-in and anonymous visitors (RLS permitting).
+ * The table holds a single shared profile row, so this upserts by a fixed
+ * sentinel id. When an auth user IS present we still prefer that user id, so
+ * the row can later be migrated to a per-user key without changing callers.
+ *
+ * Never throws: every failure is returned as `{ ok: false }` so the calling
+ * client can show an inline error instead of crashing the server action.
  */
 export async function updateBillingCycleDay(
   billingCycleDay: number,
@@ -343,11 +347,15 @@ export async function updateBillingCycleDay(
       return { ok: false, error: "Supabase is not configured." };
     }
 
+    /* Signed in -> own row; anonymous -> the shared fallback row. */
+    const userId = await getAuthUserId();
+    const rowId = userId ?? PROFILE_ID;
+
     const { data, error } = await supabase
       .from(PROFILES_TABLE)
       .upsert(
         {
-          id: PROFILE_ID,
+          id: rowId,
           billing_cycle_day: day,
           updated_at: new Date().toISOString(),
         },
@@ -356,7 +364,11 @@ export async function updateBillingCycleDay(
       .select("id, billing_cycle_day")
       .single();
 
-    if (error) return { ok: false, error: error.message };
+    if (error) {
+      /* Schema drift (e.g. a per-user `user_id` key instead of `id`) should
+         degrade gracefully rather than break the settings modal. */
+      return { ok: false, error: error.message };
+    }
 
     /* Purge the RSC cache for the dashboard so the new cycle window paints. */
     revalidatePath("/dashboard");

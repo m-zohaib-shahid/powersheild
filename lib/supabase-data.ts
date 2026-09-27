@@ -8,7 +8,7 @@ import {
   getRecentReadings,
   type MeterLog,
 } from "@/app/actions/meter";
-import { calculateMeterMetrics } from "@/lib/burn-rate";
+import { calculateMeterMetrics, DEFAULT_BILLING_CYCLE_DAY } from "@/lib/burn-rate";
 import { DASHBOARD, MOCK_READINGS } from "@/lib/mock-data";
 import { getDeltaZone } from "@/lib/tariff";
 import { selectOwnedRows } from "@/lib/user-scope";
@@ -55,26 +55,73 @@ function mapLogsToEntries(
 }
 
 /**
+ * Resolves the persisted billing anchor without ever throwing.
+ *
+ * The `profiles` table is optional infrastructure: it may not exist yet, RLS
+ * may deny the read, or Supabase may be unreachable from the Vercel runtime.
+ * In every one of those cases the dashboard must still render, so we fall back
+ * to the static mock day rather than propagating an error into the RSC render.
+ */
+async function safeBillingCycleDay(fallback: number): Promise<number> {
+  try {
+    const day = await getBillingCycleDay(fallback);
+    return Number.isFinite(day) ? day : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/** Resolves the session user id without ever throwing. */
+async function safeUserId(): Promise<string | null> {
+  try {
+    return await getAuthUserId();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Runs a Supabase-backed action, converting any thrown/rejected call into the
+ * action's own `{ ok: false }` shape so one failure cannot abort the render.
+ */
+async function settle<T>(
+  run: () => Promise<{ ok: true; data: T } | { ok: false; error: string }>,
+): Promise<{ ok: true; data: T } | { ok: false; error: string }> {
+  try {
+    return await run();
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Unknown error.",
+    };
+  }
+}
+
+/**
  * Server-side data loader for the dashboard.
  *
  * Reads the latest reading, the cycle-start baseline and the recent history
  * from Supabase in parallel, then derives the analytics engine output. If
  * Supabase is not configured, errors, or the table is still empty, it falls
  * back to the static mock snapshot so the UI never renders a broken state.
+ *
+ * The whole body is additionally wrapped in a top-level guard: this function
+ * runs inside a Server Component, so ANY unhandled rejection here surfaces as
+ * a 500 on Vercel. It must always resolve with renderable data.
  */
 export async function getDashboardData(): Promise<DashboardData> {
   const targetLimit = DASHBOARD.targetLimit;
 
   /* The user's own billing anchor wins; otherwise fall back to the default. */
   const [billingCycleDay, userId] = await Promise.all([
-    getBillingCycleDay(DASHBOARD.billingCycleDay),
-    getAuthUserId(),
+    safeBillingCycleDay(DASHBOARD.billingCycleDay),
+    safeUserId(),
   ]);
 
   const [latestResult, baselineResult, historyResult] = await Promise.all([
-    getLatestReading(),
-    getCycleStartReading(billingCycleDay),
-    getRecentReadings(5),
+    settle(() => getLatestReading()),
+    settle(() => getCycleStartReading(billingCycleDay)),
+    settle(() => getRecentReadings(5)),
   ]);
 
   const latestLog = latestResult.ok ? latestResult.data : null;
@@ -133,4 +180,39 @@ function formatLastUpdated(isoDate: string): string {
     month: "short",
     year: "numeric",
   });
+}
+
+/** Fully offline snapshot used when anything at all goes wrong. */
+function emergencyFallback(): DashboardData {
+  return {
+    snapshot: { ...DASHBOARD, billingCycleDay: DEFAULT_BILLING_CYCLE_DAY },
+    entries: MOCK_READINGS,
+    metrics: calculateMeterMetrics({
+      currentReading: DASHBOARD.currentReading,
+      cycleStartReading: DASHBOARD.cycleStartReading,
+      billingCycleDay: DEFAULT_BILLING_CYCLE_DAY,
+      targetUnitLimit: DASHBOARD.targetLimit,
+    }),
+    isLive: false,
+    userId: null,
+  };
+}
+
+/**
+ * Production-safe entry point used by the dashboard route.
+ *
+ * `getDashboardData` is wrapped so that an unexpected throw (Supabase outage,
+ * schema drift, invalid data) degrades to mock data instead of producing a
+ * 500 from the Server Component on Vercel.
+ */
+export async function getDashboardDataSafe(): Promise<DashboardData> {
+  try {
+    return await getDashboardData();
+  } catch (error) {
+    console.error(
+      "[PowerShield] dashboard data load failed, using mock fallback:",
+      error,
+    );
+    return emergencyFallback();
+  }
 }

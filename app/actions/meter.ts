@@ -1,8 +1,12 @@
 "use server";
 
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { cookies } from "next/headers";
 
 import { getCycleStartDate } from "@/lib/burn-rate";
+import {
+  createClient,
+  isSupabaseConfigured,
+} from "@/utils/supabase/server";
 
 /** Row shape of the `meter_logs` table (raw readings only — never deltas). */
 export interface MeterLog {
@@ -22,22 +26,14 @@ export type ActionResult<T> =
 const METER_LOGS_TABLE = "meter_logs";
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
-/** Server-side Supabase client (anon or service-role key from .env.local). */
-function getSupabase(): SupabaseClient {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ??
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!url || !key) {
-    throw new Error(
-      "Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and an API key in .env.local.",
-    );
-  }
-
-  return createClient(url, key, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+/**
+ * Resolves a request-scoped Supabase client using the incoming cookies.
+ * Returns `null` when the project is not configured so callers can fall back
+ * to mock data instead of failing the whole render.
+ */
+async function getSupabase() {
+  if (!isSupabaseConfigured()) return null;
+  return createClient(await cookies());
 }
 
 function toIsoDate(date: Date): string {
@@ -63,7 +59,11 @@ export async function logMeterReading(input: {
   }
 
   try {
-    const supabase = getSupabase();
+    const supabase = await getSupabase();
+    if (!supabase) {
+      return { ok: false, error: "Supabase is not configured." };
+    }
+
     const { data, error } = await supabase
       .from(METER_LOGS_TABLE)
       .insert({
@@ -94,7 +94,11 @@ export async function getCycleStartReading(
 ): Promise<ActionResult<number | null>> {
   try {
     const cycleStartIso = toIsoDate(getCycleStartDate(billingCycleDay, asOf));
-    const supabase = getSupabase();
+    const supabase = await getSupabase();
+    if (!supabase) {
+      return { ok: false, error: "Supabase is not configured." };
+    }
+
     const { data, error } = await supabase
       .from(METER_LOGS_TABLE)
       .select("id, reading_value, reading_date, created_at")
@@ -116,7 +120,11 @@ export async function getCycleStartReading(
 /** Most recent meter log (any date), used as "previous reading" in the UI. */
 export async function getLatestReading(): Promise<ActionResult<MeterLog | null>> {
   try {
-    const supabase = getSupabase();
+    const supabase = await getSupabase();
+    if (!supabase) {
+      return { ok: false, error: "Supabase is not configured." };
+    }
+
     const { data, error } = await supabase
       .from(METER_LOGS_TABLE)
       .select("id, reading_value, reading_date, created_at")
@@ -165,3 +173,36 @@ export async function getMeterSnapshot(
     },
   };
 }
+
+/**
+ * Most recent raw readings (newest first) for the dashboard history list.
+ * Deltas are derived per row by comparing against the preceding (older)
+ * reading, so the client never has to store them.
+ */
+export async function getRecentReadings(
+  limit = 5,
+): Promise<ActionResult<MeterLog[]>> {
+  try {
+    const supabase = await getSupabase();
+    if (!supabase) {
+      return { ok: false, error: "Supabase is not configured." };
+    }
+
+    const safeLimit = Math.min(Math.max(Math.trunc(limit) || 5, 1), 100);
+    const { data, error } = await supabase
+      .from(METER_LOGS_TABLE)
+      .select("id, reading_value, reading_date, created_at")
+      .order("reading_date", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(safeLimit);
+
+    if (error) return { ok: false, error: error.message };
+    return { ok: true, data: (data ?? []) as MeterLog[] };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Unknown error.",
+    };
+  }
+}
+

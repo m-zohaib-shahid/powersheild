@@ -78,7 +78,7 @@ export default function AddReadingModal({
     meterIssue !== null && (touchedMeter || meterValue.trim() !== "");
   const showDateError = dateIssue !== null && touchedDate;
 
-  /* The camera runs only while the OCR tab is visible and modal open â€”
+  /* The camera runs only while the OCR tab is visible and modal open -
      flipping this to false triggers OcrScanner's track cleanup instantly. */
   const isOcrActive = isOpen && activeTab === "ocr" && cameraEnabled;
 
@@ -180,7 +180,7 @@ export default function AddReadingModal({
             if (event.target === event.currentTarget) onClose();
           }}
         >
-          {/* Backdrop â€” click outside the sheet dismisses the modal */}
+          {/* Backdrop - click outside the sheet dismisses the modal */}
           <motion.button
             type="button"
             aria-label="Close add reading dialog"
@@ -461,7 +461,7 @@ export default function AddReadingModal({
                 hidden={activeTab !== "ocr"}
                 className="space-y-4"
               >
-                {/* Live camera viewfinder â€” releases all tracks on close/tab switch */}
+                {/* Live camera viewfinder - releases all tracks on close/tab switch */}
                 <OcrScanner
                   isActive={isOcrActive}
                   onCapture={(file) => setFileName(file.name)}
@@ -520,7 +520,7 @@ export default function AddReadingModal({
                   )}
                 </AnimatePresence>
 
-                {/* OCR action â€” enabled once the vision backend lands */}
+                {/* OCR action - enabled once the vision backend lands */}
                 <button
                   type="button"
                   disabled
@@ -530,7 +530,7 @@ export default function AddReadingModal({
                   Scan Reading (OCR)
                 </button>
                 <p className="text-center text-[11px] leading-relaxed text-slate-500">
-                  OCR runs on the vision backend â€” connect it to enable
+                  OCR runs on the vision backend - connect it to enable
                   auto-scan.
                 </p>
               </div>

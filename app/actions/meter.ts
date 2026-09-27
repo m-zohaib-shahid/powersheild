@@ -2,14 +2,14 @@
 
 import { cookies } from "next/headers";
 
-import { getCycleStartDate } from "@/lib/burn-rate";
+import { getCycleStartDate, clampCycleDay, DEFAULT_BILLING_CYCLE_DAY } from "@/lib/burn-rate";
 import { buildUserScopeFilter } from "@/lib/user-scope";
 import {
   createClient,
   isSupabaseConfigured,
 } from "@/utils/supabase/server";
 
-/** Row shape of the `meter_logs` table (raw readings only — never deltas). */
+/** Row shape of the `meter_logs` table (raw readings only -- never deltas). */
 export interface MeterLog {
   id: string;
   /** Raw cumulative meter index exactly as displayed on the meter (kWh). */
@@ -27,6 +27,7 @@ export type ActionResult<T> =
   | { ok: false; error: string };
 
 const METER_LOGS_TABLE = "meter_logs";
+const PROFILES_TABLE = "profiles";
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 /** Columns selected by every read query (kept in one place). */
@@ -71,7 +72,7 @@ function toIsoDate(date: Date): string {
  * Today's date in the server's LOCAL timezone.
  *
  * Deliberately avoids `new Date().toISOString().split("T")[0]`, which returns
- * the UTC day — for UTC+05:00 (Pakistan) a reading logged at 1:00 AM would be
+ * the UTC day -- for UTC+05:00 (Pakistan) a reading logged at 1:00 AM would be
  * stamped with the previous day, silently corrupting the billing-cycle math.
  */
 function toLocalIsoDate(): string {
@@ -80,7 +81,7 @@ function toLocalIsoDate(): string {
 
 /**
  * Stores the RAW meter reading (actual display value, e.g. 4580 kWh) into
- * `meter_logs`. Delta units are NEVER persisted — they are always derived at
+ * `meter_logs`. Delta units are NEVER persisted -- they are always derived at
  * read-time by comparing against the cycle-start baseline reading.
  *
  * The owning account is resolved from the Supabase session. Signed-in users
@@ -89,7 +90,7 @@ function toLocalIsoDate(): string {
  *
  * @param readingValue Raw meter index shown on the physical meter.
  * @param readingDate  Optional ISO date (YYYY-MM-DD). Defaults to today, in
- *                     the SERVER's local timezone — never `toISOString()`,
+ *                     the SERVER's local timezone -- never `toISOString()`,
  *                     which would shift the day for UTC+ users.
  */
 export async function logMeterReading(
@@ -282,6 +283,94 @@ export async function getRecentReadings(
       ok: false,
       error: error instanceof Error ? error.message : "Unknown error.",
     };
+  } }
+
+/* =============================================================================
+ * User profile preferences
+ * ==========================================================================*/
+
+/**
+ * Shape of a `profiles` row. Only the columns this app reads/writes.
+ */
+type UserProfile = {
+  user_id: string;
+  billing_cycle_day: number;
+};
+
+/**
+ * Reads the signed-in user's billing cycle preference.
+ *
+ * Returns `fallbackDay` for anonymous visitors, a missing profile, or any
+ * query error, so the dashboard always has a valid anchor.
+ */
+export async function getBillingCycleDay(
+  fallbackDay: number = DEFAULT_BILLING_CYCLE_DAY,
+): Promise<number> {
+  try {
+    const userId = await getAuthUserId();
+    if (!userId) return fallbackDay;
+
+    const supabase = await getSupabase();
+    if (!supabase) return fallbackDay;
+
+    const { data, error } = await supabase
+      .from(PROFILES_TABLE)
+      .select("billing_cycle_day")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (error || !data) return fallbackDay;
+    return clampCycleDay(data.billing_cycle_day ?? fallbackDay);
+  } catch {
+    return fallbackDay;
   }
 }
 
+/**
+ * Persists the user's billing cycle anchor day.
+ *
+ * Upserts on `user_id`, so the first save creates the profile row and later
+ * saves update it. Requires an authenticated session - anonymous visitors keep
+ * the local (device) preference instead.
+ */
+export async function saveBillingCycleDay(
+  billingCycleDay: number,
+): Promise<ActionResult<number>> {
+  const day = clampCycleDay(billingCycleDay);
+
+  try {
+    const userId = await getAuthUserId();
+    if (!userId) {
+      return {
+        ok: false,
+        error: "Sign in to sync your billing day across devices.",
+      };
+    }
+
+    const supabase = await getSupabase();
+    if (!supabase) {
+      return { ok: false, error: "Supabase is not configured." };
+    }
+
+    const { data, error } = await supabase
+      .from(PROFILES_TABLE)
+      .upsert(
+        {
+          user_id: userId,
+          billing_cycle_day: day,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id" },
+      )
+      .select("user_id, billing_cycle_day")
+      .single();
+
+    if (error) return { ok: false, error: error.message };
+    return { ok: true, data: clampCycleDay(data.billing_cycle_day) };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Unknown error.",
+    };
+  }
+}

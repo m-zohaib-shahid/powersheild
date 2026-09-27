@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 
 import { motion } from "framer-motion";
-import { Plus, Info, TriangleAlert, CircleCheck } from "lucide-react";
+import { Plus, Info, TriangleAlert, CircleCheck, Settings2 } from "lucide-react";
 
 import GaugeMeter from "@/components/dashboard/GaugeMeter";
 import KpiCards from "@/components/dashboard/KpiCards";
@@ -12,7 +12,8 @@ import RecentLogs from "@/components/dashboard/RecentLogs";
 import Header from "@/components/layout/Header";
 import AddReadingModal from "@/components/meter/AddReadingModal";
 
-import { logMeterReading } from "@/app/actions/meter";
+import { logMeterReading, saveBillingCycleDay } from "@/app/actions/meter";
+import CycleSettingsModal from "@/components/dashboard/CycleSettingsModal";
 import { calculateMeterMetrics } from "@/lib/burn-rate";
 import { ZONE_META, getDeltaZone } from "@/lib/tariff";
 import type { DashboardData } from "@/lib/supabase-data";
@@ -37,6 +38,10 @@ export default function DashboardView({ initialData }: DashboardViewProps) {
     initialData.entries,
   );
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isCycleSettingsOpen, setIsCycleSettingsOpen] = useState(false);
+  const [billingCycleDay, setBillingCycleDay] = useState(
+    initialData.snapshot.billingCycleDay,
+  );
   const [saveState, setSaveState] = useState<"idle" | "saved" | "error">(
     "idle",
   );
@@ -95,16 +100,44 @@ export default function DashboardView({ initialData }: DashboardViewProps) {
       calculateMeterMetrics({
         currentReading,
         cycleStartReading: initialData.snapshot.cycleStartReading,
-        billingCycleDay: initialData.snapshot.billingCycleDay,
+        billingCycleDay,
         targetUnitLimit: initialData.snapshot.targetLimit,
       }),
     [
       currentReading,
       initialData.snapshot.cycleStartReading,
-      initialData.snapshot.billingCycleDay,
+      billingCycleDay,
       initialData.snapshot.targetLimit,
     ],
   );
+
+  /**
+   * Persists the billing anchor: signed-in users sync to the `profiles`
+   * table, anonymous visitors fall back to a local (device) preference.
+   */
+  async function handleCycleDaySave(day: number): Promise<boolean> {
+    /* Always reflect the change locally so the UI responds instantly. */
+    setBillingCycleDay(day);
+
+    if (initialData.userId) {
+      const result = await saveBillingCycleDay(day);
+      if (!result.ok) {
+        setSaveState("error");
+        setSaveError(result.error);
+        /* Roll back to the server-confirmed value on failure. */
+        setBillingCycleDay(initialData.snapshot.billingCycleDay);
+        return false;
+      }
+    } else {
+      window.localStorage.setItem("powershield.billingCycleDay", String(day));
+    }
+
+    setSaveState("saved");
+    setSaveError(null);
+    window.setTimeout(() => setSaveState("idle"), 3000);
+    router.refresh();
+    return true;
+  }
 
   const zoneMeta = ZONE_META[metrics.zone];
   const remaining = initialData.snapshot.targetLimit - metrics.unitsConsumed;
@@ -137,11 +170,25 @@ export default function DashboardView({ initialData }: DashboardViewProps) {
               Tariff Safeguard Dashboard
             </h1>
             <p className="mt-1 text-sm text-slate-400">
-              Billing cycle {formatReadingDate(metrics.cycleStartDate)} –{" "}
+              Billing cycle {formatReadingDate(metrics.cycleStartDate)} -{" "}
               {formatReadingDate(metrics.cycleEndDate)} ·{" "}
               {metrics.daysRemaining} days left
             </p>
           </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsCycleSettingsOpen(true)}
+              aria-label="Change billing cycle start day"
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-600 bg-slate-800 px-3 py-2.5 text-sm font-semibold text-slate-200 transition hover:border-emerald-600/50 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60"
+            >
+              <Settings2 className="h-4 w-4" aria-hidden="true" />
+              <span className="hidden sm:inline">
+                Cycle Day {billingCycleDay}
+              </span>
+              <span className="sm:hidden">{billingCycleDay}</span>
+            </button>
 
           <button
             type="button"
@@ -151,6 +198,7 @@ export default function DashboardView({ initialData }: DashboardViewProps) {
             <Plus className="h-4 w-4" aria-hidden="true" />
             Add Reading
           </button>
+          </div>
         </div>
 
         {/* Save feedback banner */}
@@ -298,6 +346,15 @@ export default function DashboardView({ initialData }: DashboardViewProps) {
         previousReadingDate={latestEntry.date}
         cycleStartReading={initialData.snapshot.cycleStartReading}
         onSubmit={handleReadingSubmit}
+      />
+
+      {/* Billing cycle configuration */}
+      <CycleSettingsModal
+        isOpen={isCycleSettingsOpen}
+        onClose={() => setIsCycleSettingsOpen(false)}
+        currentDay={billingCycleDay}
+        userName={initialData.isLive ? undefined : "Demo mode"}
+        onSave={handleCycleDaySave}
       />
     </div>
   );

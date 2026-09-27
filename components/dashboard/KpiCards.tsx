@@ -5,6 +5,7 @@ import { Calendar, ShieldAlert, TrendingUp, Zap } from "lucide-react";
 
 import type { KpiCardItem, KpiCardsProps, KpiTone } from "@/lib/types";
 import type { MeterMetrics } from "@/lib/burn-rate";
+import { CYCLE_LENGTH_DAYS } from "@/lib/burn-rate";
 import { MOCK_KPI_CARDS } from "@/lib/mock-data";
 import { cn, formatReadingDate, formatUnits } from "@/lib/utils";
 
@@ -111,6 +112,70 @@ function buildMetricItems(metrics: MeterMetrics): KpiCardItem[] {
   ];
 }
 
+/**
+ * Compact cycle header shown above the KPI grid: the active 30-day window and
+ * a progress bar for the days consumed so far. Rendered only when live metrics
+ * are available (the mock card list has no cycle context).
+ */
+function CycleProgressBanner({ metrics }: { metrics: MeterMetrics }) {
+  /* Clamp to 0-1 so the bar can never overflow its track. */
+  const progress = Math.min(Math.max(metrics.cycleProgress, 0), 1);
+  const percent = Math.round(progress * 100);
+  const isEnding = metrics.daysRemaining <= 5;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+      className="mb-3 rounded-2xl border border-slate-700 bg-slate-800/80 p-4 shadow-card backdrop-blur-xl sm:p-5"
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+          Active Cycle:{" "}
+          <span className="text-white">
+            {formatReadingDate(metrics.cycleStartDate)} -{" "}
+            {formatReadingDate(metrics.cycleEndDate)}
+          </span>
+        </p>
+        <p className="text-xs font-semibold tabular-nums text-slate-300">
+          Day{" "}
+          <span className={isEnding ? "text-amber-400" : "text-white"}>
+            {metrics.daysElapsed}
+          </span>{" "}
+          of {CYCLE_LENGTH_DAYS}
+        </p>
+      </div>
+
+      <div
+        role="progressbar"
+        aria-valuenow={metrics.daysElapsed}
+        aria-valuemin={1}
+        aria-valuemax={CYCLE_LENGTH_DAYS}
+        aria-label="Cycle days elapsed"
+        className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-700/70"
+      >
+        <motion.div
+          className={cn(
+            "h-full rounded-full",
+            isEnding
+              ? "bg-gradient-to-r from-amber-500 to-amber-400"
+              : "bg-gradient-to-r from-emerald-600 to-emerald-400",
+          )}
+          initial={{ width: 0 }}
+          animate={{ width: `${percent}%` }}
+          transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1], delay: 0.1 }}
+        />
+      </div>
+
+      <p className="mt-2 text-[11px] text-slate-500">
+        {metrics.daysElapsed} of {CYCLE_LENGTH_DAYS} days elapsed ({percent}%)
+        · {metrics.daysRemaining} days remaining
+      </p>
+    </motion.div>
+  );
+}
+
 export default function KpiCards({
   metrics,
   items = MOCK_KPI_CARDS,
@@ -119,12 +184,15 @@ export default function KpiCards({
   const cards = metrics ? buildMetricItems(metrics) : items;
 
   return (
-    <motion.div
-      className={cn("grid grid-cols-2 gap-3 sm:gap-4", className)}
-      variants={GRID_VARIANTS}
-      initial="hidden"
-      animate="visible"
-    >
+    <div>
+      {metrics && <CycleProgressBanner metrics={metrics} />}
+
+      <motion.div
+        className={cn("grid grid-cols-2 gap-3 sm:gap-4", className)}
+        variants={GRID_VARIANTS}
+        initial="hidden"
+        animate="visible"
+      >
       {cards.map((item) => {
         const tone = TONE_STYLES[item.tone];
         const Icon = item.icon;
@@ -177,6 +245,7 @@ export default function KpiCards({
           </motion.article>
         );
       })}
-    </motion.div>
+      </motion.div>
+    </div>
   );
 }

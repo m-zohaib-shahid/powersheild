@@ -3,12 +3,25 @@ import { toLocalDateString } from "./utils";
 
 /**
  * ---------------------------------------------------------------------------
- * PowerShield analytics engine (cumulative meter model)
+ * PowerShield analytics engine (cumulative meter + 30-day window model)
  * ---------------------------------------------------------------------------
  * Users log the ACTUAL reading shown on their physical meter (e.g. 4580 kWh).
  * The engine derives every delta/burn/projection metric by comparing the
  * current reading against the cycle-start baseline reading.
+ *
+ * The billing cycle is a FIXED 30-DAY WINDOW anchored to `billingCycleDay`:
+ *   * today >= billingCycleDay -> cycle started on that day THIS month
+ *   * today <  billingCycleDay -> cycle started on that day LAST month
+ * The window always ends exactly 30 days after it starts, so a cycle anchored
+ * on the 5th always closes on the 5th of the following month regardless of
+ * month length (Feb 28/29 days never stretches or shrinks the window).
  */
+
+/** Every PowerShield billing cycle is exactly this long. */
+export const CYCLE_LENGTH_DAYS = 30;
+
+/** Fallback anchor used when a user has not configured one yet. */
+export const DEFAULT_BILLING_CYCLE_DAY = 10;
 
 export interface CalculateMeterMetricsParams {
   /** Actual meter value logged today (e.g. 4580). */
@@ -32,15 +45,20 @@ export interface MeterMetrics {
   daysElapsed: number;
   daysRemaining: number;
   cycleLengthDays: number;
-  /** Inclusive cycle bounds as YYYY-MM-DD (e.g. 2026-09-10 … 2026-10-09). */
+  /** Cycle start as YYYY-MM-DD (e.g. 2026-09-05). */
   cycleStartDate: string;
+  /** Cycle resets as YYYY-MM-DD - exactly 30 days later (e.g. 2026-10-05). */
   cycleEndDate: string;
+  /** Configured anchor day (1-31) that produced this window. */
+  billingCycleDay: number;
   dailyBurnRate: number;
   projectedUnits: number;
   recommendedDailyCap: number;
   /** Zoning driven by projected units (see getStatusZone). */
   zone: ConsumptionZone;
   percentOfLimit: number;
+  /** Fraction of the 30-day window consumed (0-1), for progress bars. */
+  cycleProgress: number;
   overLimit: boolean;
 }
 
@@ -56,10 +74,19 @@ function daysInMonth(year: number, monthIndex: number): number {
   return new Date(year, monthIndex + 1, 0).getDate();
 }
 
-function clampCycleDay(day: number): number {
+/**
+ * Normalises any input into a valid 1-31 anchor day.
+ *
+ * Values below 1 or above 31 are NOT clamped to the nearest edge - they are
+ * invalid, so they fall back to the default. This matters because 0/NaN would
+ * otherwise silently become day 1 and shift the whole billing window.
+ */
+export function clampCycleDay(day: number): number {
   const truncated = Math.trunc(day);
-  if (!Number.isFinite(truncated)) return 1;
-  return Math.min(Math.max(truncated, 1), 31);
+  if (!Number.isFinite(truncated) || truncated < 1 || truncated > 31) {
+    return DEFAULT_BILLING_CYCLE_DAY;
+  }
+  return truncated;
 }
 
 function startOfDay(date: Date): Date {
@@ -72,9 +99,13 @@ function diffInDays(later: Date, earlier: Date): number {
   );
 }
 
+
 /**
- * Most recent occurrence of `billingCycleDay` on or before `asOf` in local
- * time, clamped to short months (day 31 → 28/29 during February).
+ * Start of the ACTIVE 30-day cycle window, in local time.
+ *
+ * If today falls on or after the anchor day, the cycle began on that day this
+ * month; otherwise it began on that day last month. The anchor is clamped to
+ * short months (day 31 -> 28/29 in February) so the date always exists.
  */
 export function getCycleStartDate(
   billingCycleDay: number,
@@ -82,29 +113,34 @@ export function getCycleStartDate(
 ): Date {
   const day = clampCycleDay(billingCycleDay);
   const today = startOfDay(asOf);
-  const thisMonth = new Date(
+
+  const anchoredThisMonth = new Date(
     today.getFullYear(),
     today.getMonth(),
     Math.min(day, daysInMonth(today.getFullYear(), today.getMonth())),
   );
-  if (thisMonth.getTime() <= today.getTime()) return thisMonth;
+  if (anchoredThisMonth.getTime() <= today.getTime()) {
+    return anchoredThisMonth;
+  }
 
   const previousMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
   return new Date(
     previousMonth.getFullYear(),
     previousMonth.getMonth(),
-    Math.min(day, daysInMonth(previousMonth.getFullYear(), previousMonth.getMonth())),
+    Math.min(
+      day,
+      daysInMonth(previousMonth.getFullYear(), previousMonth.getMonth()),
+    ),
   );
 }
 
-function getNextCycleStart(cycleStart: Date, billingCycleDay: number): Date {
-  const day = clampCycleDay(billingCycleDay);
-  const nextMonth = new Date(cycleStart.getFullYear(), cycleStart.getMonth() + 1, 1);
-  return new Date(
-    nextMonth.getFullYear(),
-    nextMonth.getMonth(),
-    Math.min(day, daysInMonth(nextMonth.getFullYear(), nextMonth.getMonth())),
-  );
+/** The reset boundary: the active cycle's start plus exactly 30 days. */
+export function getCycleEndDate(
+  billingCycleDay: number,
+  asOf: Date = new Date(),
+): Date {
+  const start = getCycleStartDate(billingCycleDay, asOf);
+  return new Date(startOfDay(start).getTime() + CYCLE_LENGTH_DAYS * MS_PER_DAY);
 }
 
 /**
@@ -133,10 +169,14 @@ export function calculateMeterMetrics({
   const unitsConsumed = Math.max(0, roundTo(currentReading - cycleStartReading, 2));
 
   const cycleStartDate = getCycleStartDate(billingCycleDay, now);
-  const nextCycleStart = getNextCycleStart(cycleStartDate, billingCycleDay);
-  const cycleLengthDays = Math.max(1, diffInDays(nextCycleStart, cycleStartDate));
-  const daysElapsed = Math.max(1, diffInDays(now, cycleStartDate) + 1);
-  const daysRemaining = Math.max(0, cycleLengthDays - daysElapsed);
+  const cycleEndDate = getCycleEndDate(billingCycleDay, now);
+
+  /* Day 1 = the anchor day itself, so elapsed is clamped to 1..30. */
+  const daysElapsed = Math.min(
+    Math.max(diffInDays(now, cycleStartDate) + 1, 1),
+    CYCLE_LENGTH_DAYS,
+  );
+  const daysRemaining = Math.max(0, CYCLE_LENGTH_DAYS - daysElapsed);
 
   const dailyBurnRate = roundTo(unitsConsumed / daysElapsed, 2);
   const projectedUnits = roundTo(
@@ -163,17 +203,16 @@ export function calculateMeterMetrics({
     targetUnitLimit: safeLimit,
     daysElapsed,
     daysRemaining,
-    cycleLengthDays,
+    cycleLengthDays: CYCLE_LENGTH_DAYS,
     cycleStartDate: toLocalDateString(cycleStartDate),
-    /* Inclusive last day of the cycle (day before the next reset). */
-    cycleEndDate: toLocalDateString(
-      new Date(nextCycleStart.getTime() - MS_PER_DAY),
-    ),
+    cycleEndDate: toLocalDateString(cycleEndDate),
+    billingCycleDay: clampCycleDay(billingCycleDay),
     dailyBurnRate,
     projectedUnits,
     recommendedDailyCap,
     zone,
     percentOfLimit,
+    cycleProgress: daysElapsed / CYCLE_LENGTH_DAYS,
     overLimit: unitsConsumed > safeLimit,
   };
 }

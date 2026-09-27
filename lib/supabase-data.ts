@@ -2,6 +2,7 @@ import "server-only";
 
 import {
   getAuthUserId,
+  getBillingCycleDay,
   getCycleStartReading,
   getLatestReading,
   getRecentReadings,
@@ -62,16 +63,19 @@ function mapLogsToEntries(
  * back to the static mock snapshot so the UI never renders a broken state.
  */
 export async function getDashboardData(): Promise<DashboardData> {
-  const billingCycleDay = DASHBOARD.billingCycleDay;
   const targetLimit = DASHBOARD.targetLimit;
 
-  const [latestResult, baselineResult, historyResult, userId] =
-    await Promise.all([
-      getLatestReading(),
-      getCycleStartReading(billingCycleDay),
-      getRecentReadings(5),
-      getAuthUserId(),
-    ]);
+  /* The user's own billing anchor wins; otherwise fall back to the default. */
+  const [billingCycleDay, userId] = await Promise.all([
+    getBillingCycleDay(DASHBOARD.billingCycleDay),
+    getAuthUserId(),
+  ]);
+
+  const [latestResult, baselineResult, historyResult] = await Promise.all([
+    getLatestReading(),
+    getCycleStartReading(billingCycleDay),
+    getRecentReadings(5),
+  ]);
 
   const latestLog = latestResult.ok ? latestResult.data : null;
   const cycleStartReading = baselineResult.ok ? baselineResult.data : null;

@@ -3,6 +3,7 @@
 import { cookies } from "next/headers";
 
 import { getCycleStartDate } from "@/lib/burn-rate";
+import { buildUserScopeFilter } from "@/lib/user-scope";
 import {
   createClient,
   isSupabaseConfigured,
@@ -15,6 +16,8 @@ export interface MeterLog {
   reading_value: number;
   /** Calendar date the reading was taken (YYYY-MM-DD). */
   reading_date: string;
+  /** Owning account, or null for shared demo/seed rows. */
+  user_id?: string | null;
   created_at?: string;
 }
 
@@ -26,6 +29,9 @@ export type ActionResult<T> =
 const METER_LOGS_TABLE = "meter_logs";
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
+/** Columns selected by every read query (kept in one place). */
+const LOG_COLUMNS = "id, reading_value, reading_date, user_id, created_at";
+
 /**
  * Resolves a request-scoped Supabase client using the incoming cookies.
  * Returns `null` when the project is not configured so callers can fall back
@@ -36,6 +42,25 @@ async function getSupabase() {
   return createClient(await cookies());
 }
 
+/**
+ * Returns the authenticated user id, or `null` for anonymous visitors.
+ *
+ * Never throws: a missing/broken session simply resolves to `null`, which
+ * keeps the demo/shared-row path working until the auth UI lands.
+ */
+export async function getAuthUserId(): Promise<string | null> {
+  try {
+    const supabase = await getSupabase();
+    if (!supabase) return null;
+
+    const { data, error } = await supabase.auth.getUser();
+    if (error) return null;
+    return data.user?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function toIsoDate(date: Date): string {
   const month = `${date.getMonth() + 1}`.padStart(2, "0");
   const day = `${date.getDate()}`.padStart(2, "0");
@@ -43,18 +68,40 @@ function toIsoDate(date: Date): string {
 }
 
 /**
+ * Today's date in the server's LOCAL timezone.
+ *
+ * Deliberately avoids `new Date().toISOString().split("T")[0]`, which returns
+ * the UTC day — for UTC+05:00 (Pakistan) a reading logged at 1:00 AM would be
+ * stamped with the previous day, silently corrupting the billing-cycle math.
+ */
+function toLocalIsoDate(): string {
+  return toIsoDate(new Date());
+}
+
+/**
  * Stores the RAW meter reading (actual display value, e.g. 4580 kWh) into
  * `meter_logs`. Delta units are NEVER persisted — they are always derived at
  * read-time by comparing against the cycle-start baseline reading.
+ *
+ * The owning account is resolved from the Supabase session. Signed-in users
+ * get their rows scoped to `user_id`; anonymous visitors write shared rows
+ * with `user_id = null` (RLS decides whether that is permitted).
+ *
+ * @param readingValue Raw meter index shown on the physical meter.
+ * @param readingDate  Optional ISO date (YYYY-MM-DD). Defaults to today, in
+ *                     the SERVER's local timezone — never `toISOString()`,
+ *                     which would shift the day for UTC+ users.
  */
-export async function logMeterReading(input: {
-  readingValue: number;
-  readingDate: string;
-}): Promise<ActionResult<MeterLog>> {
-  if (!Number.isFinite(input.readingValue) || input.readingValue < 0) {
+export async function logMeterReading(
+  readingValue: number,
+  readingDate?: string,
+): Promise<ActionResult<MeterLog>> {
+  if (!Number.isFinite(readingValue) || readingValue < 0) {
     return { ok: false, error: "readingValue must be a non-negative number." };
   }
-  if (!ISO_DATE_PATTERN.test(input.readingDate)) {
+
+  const resolvedDate = readingDate ?? toLocalIsoDate();
+  if (!ISO_DATE_PATTERN.test(resolvedDate)) {
     return { ok: false, error: "readingDate must be formatted as YYYY-MM-DD." };
   }
 
@@ -64,13 +111,17 @@ export async function logMeterReading(input: {
       return { ok: false, error: "Supabase is not configured." };
     }
 
+    /* Attach the active session user when one exists. */
+    const userId = await getAuthUserId();
+
     const { data, error } = await supabase
       .from(METER_LOGS_TABLE)
       .insert({
-        reading_value: input.readingValue,
-        reading_date: input.readingDate,
+        reading_value: readingValue,
+        reading_date: resolvedDate,
+        user_id: userId ?? null,
       })
-      .select("id, reading_value, reading_date, created_at")
+      .select(LOG_COLUMNS)
       .single();
 
     if (error) return { ok: false, error: error.message };
@@ -99,13 +150,21 @@ export async function getCycleStartReading(
       return { ok: false, error: "Supabase is not configured." };
     }
 
-    const { data, error } = await supabase
+    /* Scope to the caller: own rows + shared demo rows. */
+    const userId = await getAuthUserId();
+    const scope = buildUserScopeFilter(userId);
+
+    let query = supabase
       .from(METER_LOGS_TABLE)
-      .select("id, reading_value, reading_date, created_at")
+      .select(LOG_COLUMNS)
       .gte("reading_date", cycleStartIso)
       .order("reading_date", { ascending: true })
       .order("created_at", { ascending: true })
       .limit(1);
+
+    if (scope) query = query.or(scope);
+
+    const { data, error } = await query;
 
     if (error) return { ok: false, error: error.message };
     return { ok: true, data: (data?.[0] as MeterLog | undefined)?.reading_value ?? null };
@@ -125,12 +184,20 @@ export async function getLatestReading(): Promise<ActionResult<MeterLog | null>>
       return { ok: false, error: "Supabase is not configured." };
     }
 
-    const { data, error } = await supabase
+    /* Scope to the caller: own rows + shared demo rows. */
+    const userId = await getAuthUserId();
+    const scope = buildUserScopeFilter(userId);
+
+    let query = supabase
       .from(METER_LOGS_TABLE)
-      .select("id, reading_value, reading_date, created_at")
+      .select(LOG_COLUMNS)
       .order("reading_date", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(1);
+
+    if (scope) query = query.or(scope);
+
+    const { data, error } = await query;
 
     if (error) return { ok: false, error: error.message };
     return { ok: true, data: (data?.[0] as MeterLog | undefined) ?? null };
@@ -154,6 +221,8 @@ export async function getMeterSnapshot(
     currentReading: number | null;
     cycleStartReading: number | null;
     latestLog: MeterLog | null;
+    /** Authenticated caller, or null for an anonymous demo session. */
+    userId: string | null;
   }>
 > {
   const [latest, baseline] = await Promise.all([
@@ -170,6 +239,7 @@ export async function getMeterSnapshot(
       currentReading: latest.data?.reading_value ?? null,
       cycleStartReading: baseline.data,
       latestLog: latest.data,
+      userId: await getAuthUserId(),
     },
   };
 }
@@ -189,12 +259,21 @@ export async function getRecentReadings(
     }
 
     const safeLimit = Math.min(Math.max(Math.trunc(limit) || 5, 1), 100);
-    const { data, error } = await supabase
+
+    /* Scope to the caller: own rows + shared demo rows. */
+    const userId = await getAuthUserId();
+    const scope = buildUserScopeFilter(userId);
+
+    let query = supabase
       .from(METER_LOGS_TABLE)
-      .select("id, reading_value, reading_date, created_at")
+      .select(LOG_COLUMNS)
       .order("reading_date", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(safeLimit);
+
+    if (scope) query = query.or(scope);
+
+    const { data, error } = await query;
 
     if (error) return { ok: false, error: error.message };
     return { ok: true, data: (data ?? []) as MeterLog[] };

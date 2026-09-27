@@ -69,10 +69,10 @@ export default function DashboardView({ initialData }: DashboardViewProps) {
     setCurrentReading(submission.meterValue);
 
     startTransition(async () => {
-      const result = await logMeterReading({
-        readingValue: submission.meterValue,
-        readingDate: submission.readingDate,
-      });
+      const result = await logMeterReading(
+        submission.meterValue,
+        submission.readingDate,
+      );
 
       if (result.ok) {
         setSaveState("saved");

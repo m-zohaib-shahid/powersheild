@@ -1,6 +1,7 @@
 import "server-only";
 
 import {
+  getAuthUserId,
   getCycleStartReading,
   getLatestReading,
   getRecentReadings,
@@ -9,6 +10,7 @@ import {
 import { calculateMeterMetrics } from "@/lib/burn-rate";
 import { DASHBOARD, MOCK_READINGS } from "@/lib/mock-data";
 import { getDeltaZone } from "@/lib/tariff";
+import { selectOwnedRows } from "@/lib/user-scope";
 import type {
   DashboardSnapshot,
   MeterReadingEntry,
@@ -22,6 +24,8 @@ export interface DashboardData {
   metrics: MeterMetrics;
   /** False when Supabase was unreachable/empty and mock data is being shown. */
   isLive: boolean;
+  /** Authenticated caller id, or null for the anonymous demo session. */
+  userId: string | null;
 }
 
 /**
@@ -61,11 +65,13 @@ export async function getDashboardData(): Promise<DashboardData> {
   const billingCycleDay = DASHBOARD.billingCycleDay;
   const targetLimit = DASHBOARD.targetLimit;
 
-  const [latestResult, baselineResult, historyResult] = await Promise.all([
-    getLatestReading(),
-    getCycleStartReading(billingCycleDay),
-    getRecentReadings(5),
-  ]);
+  const [latestResult, baselineResult, historyResult, userId] =
+    await Promise.all([
+      getLatestReading(),
+      getCycleStartReading(billingCycleDay),
+      getRecentReadings(5),
+      getAuthUserId(),
+    ]);
 
   const latestLog = latestResult.ok ? latestResult.data : null;
   const cycleStartReading = baselineResult.ok ? baselineResult.data : null;
@@ -83,6 +89,7 @@ export async function getDashboardData(): Promise<DashboardData> {
         targetUnitLimit: targetLimit,
       }),
       isLive: false,
+      userId,
     };
   }
 
@@ -96,7 +103,10 @@ export async function getDashboardData(): Promise<DashboardData> {
       targetLimit,
       lastUpdated: formatLastUpdated(latestLog.reading_date),
     },
-    entries: mapLogsToEntries(history, cycleStartReading),
+    entries: mapLogsToEntries(
+      selectOwnedRows(history, userId),
+      cycleStartReading,
+    ),
     metrics: calculateMeterMetrics({
       currentReading,
       cycleStartReading,
@@ -104,6 +114,7 @@ export async function getDashboardData(): Promise<DashboardData> {
       targetUnitLimit: targetLimit,
     }),
     isLive: true,
+    userId,
   };
 }
 

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 
 import { motion } from "framer-motion";
-import { Plus, TriangleAlert } from "lucide-react";
+import { Plus, Info, TriangleAlert } from "lucide-react";
 
 import GaugeMeter from "@/components/dashboard/GaugeMeter";
 import KpiCards from "@/components/dashboard/KpiCards";
@@ -11,16 +11,19 @@ import RecentLogs from "@/components/dashboard/RecentLogs";
 import Header from "@/components/layout/Header";
 import AddReadingModal from "@/components/meter/AddReadingModal";
 
+import { calculateMeterMetrics } from "@/lib/burn-rate";
 import { DASHBOARD, MOCK_READINGS } from "@/lib/mock-data";
-import { ZONE_META, getConsumptionZone, getDeltaZone } from "@/lib/tariff";
+import { ZONE_META, getDeltaZone } from "@/lib/tariff";
 import type { MeterReadingEntry, ReadingSubmission } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import { cn, formatMeterValue, formatReadingDate } from "@/lib/utils";
 
 const SECTION_EASE: [number, number, number, number] = [0.16, 1, 0.3, 1];
 
 export default function DashboardPage() {
   const [mounted, setMounted] = useState(false);
-  const [consumedUnits, setConsumedUnits] = useState(DASHBOARD.consumedUnits);
+  const [currentReading, setCurrentReading] = useState(
+    DASHBOARD.currentReading,
+  );
   const [entries, setEntries] = useState<MeterReadingEntry[]>(MOCK_READINGS);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
@@ -31,9 +34,6 @@ export default function DashboardPage() {
   }, []);
 
   const latestEntry = entries[0];
-  const zone = getConsumptionZone(consumedUnits);
-  const zoneMeta = ZONE_META[zone];
-  const remaining = DASHBOARD.targetLimit - consumedUnits;
 
   /**
    * Local-only persistence: prepends the new reading and refreshes the
@@ -53,13 +53,31 @@ export default function DashboardPage() {
     };
 
     setEntries((previous) => [newEntry, ...previous]);
-    setConsumedUnits(submission.meterValue);
+    setCurrentReading(submission.meterValue);
   }
 
   /* Hydration guard: the live dashboard only ever renders client-side. */
   if (!mounted) {
     return <DashboardSkeleton />;
   }
+
+  /* Cumulative-meter analytics: raw readings in, deltas/projections out. */
+  const metrics = calculateMeterMetrics({
+    currentReading,
+    cycleStartReading: DASHBOARD.cycleStartReading,
+    billingCycleDay: DASHBOARD.billingCycleDay,
+    targetUnitLimit: DASHBOARD.targetLimit,
+  });
+  const zoneMeta = ZONE_META[metrics.zone];
+  const remaining = DASHBOARD.targetLimit - metrics.unitsConsumed;
+
+  /* Zone-aware styling for the projection callout. */
+  const alertTone =
+    metrics.zone === "critical"
+      ? "border-red-600/40 bg-red-600/10"
+      : metrics.zone === "warning"
+        ? "border-amber-600/40 bg-amber-600/10"
+        : "border-emerald-600/40 bg-emerald-600/10";
 
   return (
     <div className="relative min-h-screen">
@@ -81,8 +99,9 @@ export default function DashboardPage() {
               Tariff Safeguard Dashboard
             </h1>
             <p className="mt-1 text-sm text-slate-400">
-              Billing cycle {DASHBOARD.cycleLabel} · {DASHBOARD.daysLeft} days
-              left
+              Billing cycle {formatReadingDate(metrics.cycleStartDate)} –{" "}
+              {formatReadingDate(metrics.cycleEndDate)} ·{" "}
+              {metrics.daysRemaining} days left
             </p>
           </div>
 
@@ -134,23 +153,48 @@ export default function DashboardPage() {
 
             <div className="mt-5">
               <GaugeMeter
-                consumedUnits={consumedUnits}
+                consumedUnits={metrics.unitsConsumed}
                 targetLimit={DASHBOARD.targetLimit}
+                zone={metrics.zone}
+                baseReading={DASHBOARD.cycleStartReading}
+                meterReading={currentReading}
               />
             </div>
 
-            {/* Projection alert */}
-            <div className="mt-6 flex items-start gap-3 rounded-xl border border-amber-600/40 bg-amber-600/10 p-3.5">
-              <TriangleAlert
-                className="mt-0.5 h-4 w-4 shrink-0 text-amber-400"
-                aria-hidden="true"
-              />
-              <p className="text-xs leading-relaxed text-amber-100/90">
+            {/* Zone-aware projection callout (computed live by the engine) */}
+            <div
+              className={cn(
+                "mt-6 flex items-start gap-3 rounded-xl border p-3.5",
+                alertTone,
+              )}
+            >
+              {metrics.zone === "safe" ? (
+                <Info
+                  className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400"
+                  aria-hidden="true"
+                />
+              ) : (
+                <TriangleAlert
+                  className={cn(
+                    "mt-0.5 h-4 w-4 shrink-0",
+                    metrics.zone === "warning"
+                      ? "text-amber-400"
+                      : "text-red-400",
+                  )}
+                  aria-hidden="true"
+                />
+              )}
+              <p className="text-xs leading-relaxed">
                 Projected to hit{" "}
-                <span className="font-semibold text-white">186 units</span> by{" "}
-                {DASHBOARD.cycleEndLabel} — past the critical slab. Cut about{" "}
-                <span className="font-semibold text-white">2.2 units/day</span>{" "}
-                to land inside the safe zone.
+                <span className="font-semibold text-white">
+                  {formatMeterValue(metrics.projectedUnits)} units
+                </span>{" "}
+                by {formatReadingDate(metrics.cycleEndDate)} with{" "}
+                {metrics.daysRemaining} days left. Stay under{" "}
+                <span className="font-semibold text-white">
+                  {formatMeterValue(metrics.recommendedDailyCap)} units/day
+                </span>{" "}
+                to finish inside the {DASHBOARD.targetLimit}-unit slab.
               </p>
             </div>
           </motion.section>
@@ -160,7 +204,7 @@ export default function DashboardPage() {
             aria-label="Key performance indicators"
             className="lg:col-span-7"
           >
-            <KpiCards />
+            <KpiCards metrics={metrics} />
           </section>
 
           {/* Reading history */}
@@ -189,6 +233,7 @@ export default function DashboardPage() {
         onClose={() => setIsModalOpen(false)}
         previousReading={latestEntry.reading}
         previousReadingDate={latestEntry.date}
+        cycleStartReading={DASHBOARD.cycleStartReading}
         onSubmit={handleReadingSubmit}
       />
     </div>

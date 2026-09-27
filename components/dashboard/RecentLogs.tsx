@@ -3,7 +3,7 @@ import { Activity, Gauge, TrendingDown, TrendingUp } from "lucide-react";
 import type { RecentLogsProps } from "@/lib/types";
 import { MOCK_READINGS } from "@/lib/mock-data";
 import { ZONE_META } from "@/lib/tariff";
-import { cn, formatReadingDate } from "@/lib/utils";
+import { cn, formatMeterValue, formatReadingDate } from "@/lib/utils";
 
 export default function RecentLogs({
   entries = MOCK_READINGS,
@@ -79,9 +79,9 @@ export default function RecentLogs({
                   <p className="mt-0.5 truncate text-xs text-slate-400">
                     Meter reading{" "}
                     <span className="font-medium tabular-nums text-slate-300">
-                      {entry.reading.toFixed(1)}
+                      {formatMeterValue(entry.reading)}
                     </span>{" "}
-                    units
+                    kWh
                   </p>
                 </div>
 

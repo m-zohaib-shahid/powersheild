@@ -18,6 +18,9 @@ const RING_EASE: [number, number, number, number] = [0.16, 1, 0.3, 1];
 export default function GaugeMeter({
   consumedUnits,
   targetLimit,
+  zone: zoneOverride,
+  baseReading,
+  meterReading,
   className,
 }: GaugeMeterProps) {
   const prefersReducedMotion = useReducedMotion();
@@ -32,7 +35,11 @@ export default function GaugeMeter({
   const dashOffset = Math.max(CIRCUMFERENCE * (1 - ratio), 0);
 
   const isOverLimit = consumedUnits > safeLimit;
-  const zone = isOverLimit ? "critical" : getConsumptionZone(consumedUnits);
+  /* Zone comes from the projected-units engine when provided; otherwise the
+     legacy cumulative thresholds (or forced critical when over the limit). */
+  const zone =
+    zoneOverride ??
+    (isOverLimit ? "critical" : getConsumptionZone(consumedUnits));
   const meta = ZONE_META[zone];
   const remaining = safeLimit - consumedUnits;
 
@@ -136,10 +143,24 @@ export default function GaugeMeter({
         </div>
       </div>
 
+      {/* Raw meter subtext: cycle-start baseline → current index */}
+      {baseReading !== undefined && meterReading !== undefined && (
+        <p className="mt-4 text-center text-xs text-slate-500">
+          Base Reading:{" "}
+          <span className="font-medium tabular-nums text-slate-400">
+            {formatMeterValue(baseReading)} kWh
+          </span>{" "}
+          → Current:{" "}
+          <span className="font-medium tabular-nums text-slate-400">
+            {formatMeterValue(meterReading)} kWh
+          </span>
+        </p>
+      )}
+
       {/* Remaining allowance */}
       <p
         className={cn(
-          "mt-5 text-xs font-medium",
+          "mt-2 text-xs font-medium",
           remaining >= 0 ? "text-slate-400" : "text-red-400",
         )}
       >

@@ -14,53 +14,53 @@ export const MOCK_USER: HeaderUser = {
   initials: "AR",
 };
 
-/** Static cycle snapshot powering the dashboard mock. */
+/** Static cycle snapshot powering the dashboard mock (raw meter indices). */
 export const DASHBOARD: DashboardSnapshot = {
-  consumedUnits: 142,
+  currentReading: 4580,
+  cycleStartReading: 4400,
+  billingCycleDay: 10,
   targetLimit: 200,
-  cycleLabel: "10 Sep - 09 Oct 2026",
-  cycleEndLabel: "09 Oct 2026",
-  daysLeft: 12,
   lastUpdated: "27 Sep 2026, 9:40 PM",
 };
 
 /**
- * Five most recent meter entries (newest first).
- * Chain check: 112.8 -> 118.0 -> 124.9 -> 129.8 -> 135.6 -> 142.0
+ * Five most recent meter entries (newest first) — RAW cumulative meter
+ * indices exactly as displayed on the physical meter (kWh).
+ * Chain check: 4550.8 -> 4556.0 -> 4562.9 -> 4567.8 -> 4573.6 -> 4580.0
  */
 export const MOCK_READINGS: MeterReadingEntry[] = [
   {
     id: "reading-5",
     date: "2026-09-27",
-    reading: 142.0,
+    reading: 4580.0,
     delta: 6.4,
     zone: getDeltaZone(6.4),
   },
   {
     id: "reading-4",
     date: "2026-09-26",
-    reading: 135.6,
+    reading: 4573.6,
     delta: 5.8,
     zone: getDeltaZone(5.8),
   },
   {
     id: "reading-3",
     date: "2026-09-25",
-    reading: 129.8,
+    reading: 4567.8,
     delta: 4.9,
     zone: getDeltaZone(4.9),
   },
   {
     id: "reading-2",
     date: "2026-09-24",
-    reading: 124.9,
+    reading: 4562.9,
     delta: 6.9,
     zone: getDeltaZone(6.9),
   },
   {
     id: "reading-1",
     date: "2026-09-23",
-    reading: 118.0,
+    reading: 4556.0,
     delta: 5.2,
     zone: getDeltaZone(5.2),
   },
@@ -100,7 +100,7 @@ export const MOCK_KPI_CARDS: KpiCardItem[] = [
     label: "Days Left in Cycle",
     value: "12",
     unit: "Days",
-    caption: `Cycle ends ${DASHBOARD.cycleEndLabel}`,
+    caption: "Remaining days in current cycle",
     icon: Calendar,
     tone: "sky",
   },

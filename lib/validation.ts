@@ -48,7 +48,14 @@ export function sanitizeMeterValue(raw: string): string | null {
  * unchanged meter can still be logged; lower values are rejected with the
  * inline message required by QA.
  */
+/** Formats a meter index for messages: 4580 → "4580", 4573.6 → "4573.6". */
+function formatMeterIndex(value: number): string {
+  return Number.isInteger(value) ? value.toString() : value.toFixed(1);
+}
+
 export function createReadingFormSchema(previousReading: number) {
+  const previousLabel = formatMeterIndex(previousReading);
+
   return z.object({
     meterValue: z
       .string()
@@ -68,7 +75,7 @@ export function createReadingFormSchema(previousReading: number) {
       )
       .refine(
         (value) => Number(value) >= previousReading,
-        `New reading cannot be lower than previous entry of ${previousReading.toFixed(1)}`,
+        `New meter reading cannot be lower than the previous reading (${previousLabel} kWh).`,
       ),
     readingDate: z
       .string()

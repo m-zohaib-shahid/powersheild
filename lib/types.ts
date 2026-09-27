@@ -1,5 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 
+import type { MeterMetrics } from "./burn-rate";
+
 /**
  * Zone classification for cumulative consumption inside a billing cycle.
  * safe     -> fewer than 160 units
@@ -31,10 +33,16 @@ export interface ZoneMeta {
 }
 
 export interface GaugeMeterProps {
-  /** Units consumed so far in the billing cycle. */
+  /** Units consumed so far in the billing cycle (derived delta). */
   consumedUnits: number;
   /** Slab target limit for the cycle (defaults to 200 in the dashboard). */
   targetLimit: number;
+  /** Status zone override (projected-units zoning from the burn engine). */
+  zone?: ConsumptionZone;
+  /** Raw cycle-start baseline in kWh, e.g. 4400 (renders the subtext). */
+  baseReading?: number;
+  /** Raw current meter index in kWh, e.g. 4580 (renders the subtext). */
+  meterReading?: number;
   /** Optional class merged onto the component root. */
   className?: string;
 }
@@ -53,6 +61,9 @@ export interface KpiCardItem {
 }
 
 export interface KpiCardsProps {
+  /** Computed snapshot from the burn-rate engine (renders live values). */
+  metrics?: MeterMetrics;
+  /** Static fallback cards used when no metrics are supplied. */
   items?: KpiCardItem[];
   className?: string;
 }
@@ -95,10 +106,12 @@ export interface ReadingSubmission {
 export interface AddReadingModalProps {
   isOpen: boolean;
   onClose: () => void;
-  /** Latest meter index; readings below this value fail validation. */
+  /** Latest raw meter index; lower readings fail validation (e.g. 4580). */
   previousReading?: number;
   /** ISO date of the latest reading, shown as helper context. */
   previousReadingDate?: string;
+  /** Cycle-start baseline (kWh) used for the consumed-since-baseline preview. */
+  cycleStartReading?: number;
   onSubmit?: (submission: ReadingSubmission) => void;
 }
 
@@ -117,12 +130,18 @@ export interface OcrScannerProps {
   className?: string;
 }
 
-/** Static dashboard snapshot powering the mock UI. */
+/**
+ * Static dashboard snapshot powering the mock UI. `currentReading` and
+ * `cycleStartReading` are RAW cumulative meter indices (kWh) — never deltas.
+ */
 export interface DashboardSnapshot {
-  consumedUnits: number;
+  /** Actual meter display value logged today (e.g. 4580 kWh). */
+  currentReading: number;
+  /** Meter value captured at the start of the billing cycle (e.g. 4400). */
+  cycleStartReading: number;
+  /** Day of month (1-31) the billing cycle resets on. */
+  billingCycleDay: number;
+  /** Slab target limit in units for the cycle. */
   targetLimit: number;
-  cycleLabel: string;
-  cycleEndLabel: string;
-  daysLeft: number;
   lastUpdated: string;
 }

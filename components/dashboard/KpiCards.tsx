@@ -1,10 +1,12 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { Calendar, ShieldAlert, TrendingUp, Zap } from "lucide-react";
 
-import type { KpiCardsProps, KpiTone } from "@/lib/types";
+import type { KpiCardItem, KpiCardsProps, KpiTone } from "@/lib/types";
+import type { MeterMetrics } from "@/lib/burn-rate";
 import { MOCK_KPI_CARDS } from "@/lib/mock-data";
-import { cn } from "@/lib/utils";
+import { cn, formatReadingDate, formatUnits } from "@/lib/utils";
 
 /** Tone tokens per accent color used by the stat tiles. */
 const TONE_STYLES: Record<
@@ -52,10 +54,70 @@ const CARD_VARIANTS = {
   },
 } as const;
 
+/** Builds the four KPI tiles from the live burn-rate engine snapshot. */
+function buildMetricItems(metrics: MeterMetrics): KpiCardItem[] {
+  const burnTone: KpiTone =
+    metrics.dailyBurnRate > metrics.recommendedDailyCap ? "amber" : "emerald";
+  const zoneTone: KpiTone =
+    metrics.zone === "safe"
+      ? "emerald"
+      : metrics.zone === "warning"
+        ? "amber"
+        : "red";
+  const projectionCaption =
+    metrics.zone === "safe"
+      ? "Inside the safe slab"
+      : metrics.zone === "warning"
+        ? "Nearing the critical slab"
+        : "Past the critical slab";
+
+  return [
+    {
+      id: "daily-burn-rate",
+      label: "Daily Burn Rate",
+      value: formatUnits(metrics.dailyBurnRate, 1),
+      unit: "Units/Day",
+      caption: `Avg over ${metrics.daysElapsed} days this cycle`,
+      icon: Zap,
+      tone: burnTone,
+    },
+    {
+      id: "projected-month-end",
+      label: "Projected Month-End",
+      value: formatUnits(Math.round(metrics.projectedUnits), 0),
+      unit: "Units",
+      caption: projectionCaption,
+      icon: TrendingUp,
+      tone: zoneTone,
+    },
+    {
+      id: "recommended-daily-cap",
+      label: "Recommended Daily Cap",
+      value: formatUnits(metrics.recommendedDailyCap, 1),
+      unit: "Units/Day",
+      caption: "Remaining slab budget ÷ days left",
+      icon: ShieldAlert,
+      tone: "emerald",
+    },
+    {
+      id: "days-left",
+      label: "Days Left in Cycle",
+      value: String(metrics.daysRemaining),
+      unit: "Days",
+      caption: `Cycle ends ${formatReadingDate(metrics.cycleEndDate)}`,
+      icon: Calendar,
+      tone: "sky",
+    },
+  ];
+}
+
 export default function KpiCards({
+  metrics,
   items = MOCK_KPI_CARDS,
   className,
 }: KpiCardsProps) {
+  const cards = metrics ? buildMetricItems(metrics) : items;
+
   return (
     <motion.div
       className={cn("grid grid-cols-2 gap-3 sm:gap-4", className)}
@@ -63,7 +125,7 @@ export default function KpiCards({
       initial="hidden"
       animate="visible"
     >
-      {items.map((item) => {
+      {cards.map((item) => {
         const tone = TONE_STYLES[item.tone];
         const Icon = item.icon;
 

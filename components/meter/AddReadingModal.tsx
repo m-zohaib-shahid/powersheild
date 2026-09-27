@@ -16,7 +16,7 @@ import {
 
 import OcrScanner from "@/components/meter/OcrScanner";
 import type { AddReadingModalProps } from "@/lib/types";
-import { MOCK_READINGS } from "@/lib/mock-data";
+import { DASHBOARD, MOCK_READINGS } from "@/lib/mock-data";
 import { ZONE_META, getConsumptionZone } from "@/lib/tariff";
 import {
   MAX_METER_VALUE,
@@ -24,7 +24,12 @@ import {
   extractFieldError,
   sanitizeMeterValue,
 } from "@/lib/validation";
-import { cn, formatReadingDate, toLocalDateString } from "@/lib/utils";
+import {
+  cn,
+  formatMeterValue,
+  formatReadingDate,
+  toLocalDateString,
+} from "@/lib/utils";
 
 const TABS = [
   { id: "manual", label: "Manual Entry", icon: PencilLine },
@@ -38,6 +43,7 @@ export default function AddReadingModal({
   onClose,
   previousReading = MOCK_READINGS[0].reading,
   previousReadingDate = MOCK_READINGS[0].date,
+  cycleStartReading = DASHBOARD.cycleStartReading,
   onSubmit,
 }: AddReadingModalProps) {
   const [mounted, setMounted] = useState(false);
@@ -75,6 +81,14 @@ export default function AddReadingModal({
   /* The camera runs only while the OCR tab is visible and modal open —
      flipping this to false triggers OcrScanner's track cleanup instantly. */
   const isOcrActive = isOpen && activeTab === "ocr" && cameraEnabled;
+
+  /* Live preview: delta units burned since the cycle-start baseline reading. */
+  const previewInput = meterValue.trim();
+  const previewReading =
+    previewInput !== "" && Number.isFinite(Number(previewInput))
+      ? Number(previewInput)
+      : previousReading;
+  const unitsSinceCycleStart = Math.max(0, previewReading - cycleStartReading);
 
   /* Render the portal only after hydration (document is client-only). */
   useEffect(() => {
@@ -286,7 +300,7 @@ export default function AddReadingModal({
                     htmlFor={`${baseId}-meter-value`}
                     className="text-xs font-semibold uppercase tracking-wider text-slate-400"
                   >
-                    Current meter reading
+                    Current Meter Reading (kWh)
                   </label>
                   <div className="relative">
                     <input
@@ -296,7 +310,7 @@ export default function AddReadingModal({
                       type="text"
                       inputMode="decimal"
                       autoComplete="off"
-                      placeholder="e.g. 148.5"
+                      placeholder="e.g. 04580"
                       min={0}
                       max={MAX_METER_VALUE}
                       maxLength={9}
@@ -318,16 +332,19 @@ export default function AddReadingModal({
                       )}
                     />
                     <span className="pointer-events-none absolute inset-y-0 right-4 flex items-center text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      units
+                      kWh
                     </span>
                   </div>
                   <p
                     id={`${baseId}-meter-hint`}
                     className="text-xs text-slate-500"
                   >
+                    Enter the number shown on your meter display (e.g., 04580).
+                  </p>
+                  <p className="text-xs text-slate-500">
                     Previous reading:{" "}
                     <span className="font-medium tabular-nums text-slate-300">
-                      {previousReading.toFixed(1)} units
+                      {formatMeterValue(previousReading)} kWh
                     </span>
                     {previousReadingDate
                       ? ` · ${formatReadingDate(previousReadingDate)}`
@@ -356,6 +373,15 @@ export default function AddReadingModal({
                     )}
                   </AnimatePresence>
                 </div>
+
+                {/* Live preview: delta units vs the cycle-start baseline */}
+                <p className="rounded-xl border border-emerald-600/30 bg-emerald-600/10 px-3.5 py-3 text-xs text-emerald-200/90">
+                  Units consumed since cycle start:{" "}
+                  <span className="font-semibold tabular-nums text-emerald-300">
+                    {formatMeterValue(unitsSinceCycleStart)}
+                  </span>{" "}
+                  Units
+                </p>
 
                 {/* Date picker */}
                 <div className="space-y-1.5">
@@ -515,8 +541,8 @@ export default function AddReadingModal({
               <div className="shrink-0 border-t border-slate-700/70 bg-slate-800/95 px-4 py-4 backdrop-blur sm:px-6">
                 {!isFormValid && !showMeterError && !showDateError && (
                   <p className="mb-2.5 text-center text-[11px] text-slate-500">
-                    Enter a reading of at least {previousReading.toFixed(1)}{" "}
-                    units to continue.
+                    Enter a meter reading of at least{" "}
+                    {formatMeterValue(previousReading)} kWh to continue.
                   </p>
                 )}
                 <button

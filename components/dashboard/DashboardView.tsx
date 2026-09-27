@@ -12,7 +12,7 @@ import RecentLogs from "@/components/dashboard/RecentLogs";
 import Header from "@/components/layout/Header";
 import AddReadingModal from "@/components/meter/AddReadingModal";
 
-import { logMeterReading, saveBillingCycleDay } from "@/app/actions/meter";
+import { logMeterReading, updateBillingCycleDay } from "@/app/actions/meter";
 import CycleSettingsModal from "@/components/dashboard/CycleSettingsModal";
 import { calculateMeterMetrics } from "@/lib/burn-rate";
 import { ZONE_META, getDeltaZone } from "@/lib/tariff";
@@ -112,29 +112,36 @@ export default function DashboardView({ initialData }: DashboardViewProps) {
   );
 
   /**
-   * Persists the billing anchor: signed-in users sync to the `profiles`
-   * table, anonymous visitors fall back to a local (device) preference.
+   * Persists the billing anchor to the Supabase `profiles` table via the
+   * server action (which revalidates the route), then refreshes the RSC
+   * payload so the 30-day window and every projection re-render.
+   *
+   * On failure the previous value is restored so the UI never shows a value
+   * the database did not accept.
    */
   async function handleCycleDaySave(day: number): Promise<boolean> {
-    /* Always reflect the change locally so the UI responds instantly. */
+    /* Optimistically reflect the change so the UI feels instant. */
     setBillingCycleDay(day);
 
-    if (initialData.userId) {
-      const result = await saveBillingCycleDay(day);
-      if (!result.ok) {
-        setSaveState("error");
-        setSaveError(result.error);
-        /* Roll back to the server-confirmed value on failure. */
-        setBillingCycleDay(initialData.snapshot.billingCycleDay);
-        return false;
-      }
-    } else {
-      window.localStorage.setItem("powershield.billingCycleDay", String(day));
+    const result = await updateBillingCycleDay(day);
+
+    if (!result.ok) {
+      setSaveState("error");
+      setSaveError(result.error);
+      /* Roll back to the last server-confirmed value. */
+      setBillingCycleDay(initialData.snapshot.billingCycleDay);
+      return false;
     }
+
+    /* Keep the local mirror in sync for the anonymous/demo path. */
+    window.localStorage.setItem("powershield.billingCycleDay", String(day));
 
     setSaveState("saved");
     setSaveError(null);
     window.setTimeout(() => setSaveState("idle"), 3000);
+
+    /* The action already called revalidatePath; this pushes the fresh RSC
+       payload into the client so the banner updates immediately. */
     router.refresh();
     return true;
   }

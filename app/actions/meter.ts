@@ -1,8 +1,13 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 
-import { getCycleStartDate, clampCycleDay, DEFAULT_BILLING_CYCLE_DAY } from "@/lib/burn-rate";
+import {
+  clampCycleDay,
+  DEFAULT_BILLING_CYCLE_DAY,
+  getCycleStartDate,
+} from "@/lib/burn-rate";
 import { buildUserScopeFilter } from "@/lib/user-scope";
 import {
   createClient,
@@ -283,40 +288,34 @@ export async function getRecentReadings(
       ok: false,
       error: error instanceof Error ? error.message : "Unknown error.",
     };
-  } }
+  } 
+}
 
 /* =============================================================================
- * User profile preferences
+ * User profile preferences (public.profiles)
  * ==========================================================================*/
 
-/**
- * Shape of a `profiles` row. Only the columns this app reads/writes.
- */
-type UserProfile = {
-  user_id: string;
-  billing_cycle_day: number;
-};
+/** The single shared profile row. Matches the live table in Supabase. */
+const PROFILE_ID = "00000000-0000-0000-0000-000000000000";
 
 /**
- * Reads the signed-in user's billing cycle preference.
+ * Reads the persisted billing cycle day from `public.profiles`.
  *
- * Returns `fallbackDay` for anonymous visitors, a missing profile, or any
- * query error, so the dashboard always has a valid anchor.
+ * Falls back to `fallbackDay` (default 5) when the table is unreachable, the
+ * row is missing, or the stored value is invalid - the dashboard must always
+ * have a usable anchor.
  */
 export async function getBillingCycleDay(
   fallbackDay: number = DEFAULT_BILLING_CYCLE_DAY,
 ): Promise<number> {
   try {
-    const userId = await getAuthUserId();
-    if (!userId) return fallbackDay;
-
     const supabase = await getSupabase();
     if (!supabase) return fallbackDay;
 
     const { data, error } = await supabase
       .from(PROFILES_TABLE)
       .select("billing_cycle_day")
-      .eq("user_id", userId)
+      .eq("id", PROFILE_ID)
       .maybeSingle();
 
     if (error || !data) return fallbackDay;
@@ -327,26 +326,18 @@ export async function getBillingCycleDay(
 }
 
 /**
- * Persists the user's billing cycle anchor day.
+ * Persists the billing cycle day to `public.profiles` and revalidates the
+ * dashboard so the 30-day window, burn rate and projections refresh instantly.
  *
- * Upserts on `user_id`, so the first save creates the profile row and later
- * saves update it. Requires an authenticated session - anonymous visitors keep
- * the local (device) preference instead.
+ * The table holds a single shared profile row, so this upserts by the fixed
+ * id and works for both signed-in and anonymous visitors (RLS permitting).
  */
-export async function saveBillingCycleDay(
+export async function updateBillingCycleDay(
   billingCycleDay: number,
 ): Promise<ActionResult<number>> {
   const day = clampCycleDay(billingCycleDay);
 
   try {
-    const userId = await getAuthUserId();
-    if (!userId) {
-      return {
-        ok: false,
-        error: "Sign in to sync your billing day across devices.",
-      };
-    }
-
     const supabase = await getSupabase();
     if (!supabase) {
       return { ok: false, error: "Supabase is not configured." };
@@ -356,16 +347,20 @@ export async function saveBillingCycleDay(
       .from(PROFILES_TABLE)
       .upsert(
         {
-          user_id: userId,
+          id: PROFILE_ID,
           billing_cycle_day: day,
           updated_at: new Date().toISOString(),
         },
-        { onConflict: "user_id" },
+        { onConflict: "id" },
       )
-      .select("user_id, billing_cycle_day")
+      .select("id, billing_cycle_day")
       .single();
 
     if (error) return { ok: false, error: error.message };
+
+    /* Purge the RSC cache for the dashboard so the new cycle window paints. */
+    revalidatePath("/dashboard");
+
     return { ok: true, data: clampCycleDay(data.billing_cycle_day) };
   } catch (error) {
     return {

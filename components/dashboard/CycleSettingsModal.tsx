@@ -338,7 +338,7 @@ export default function CycleSettingsModal({
                   ) : (
                     <Check className="h-4 w-4" aria-hidden="true" />
                   )}
-                  {isSaving ? "Saving..." : "Save Billing Day"}
+                  {isSaving ? "Saving to Supabase..." : "Save Billing Day"}
                 </button>
               </div>
             </div>

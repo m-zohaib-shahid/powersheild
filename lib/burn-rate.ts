@@ -21,7 +21,7 @@ import { toLocalDateString } from "./utils";
 export const CYCLE_LENGTH_DAYS = 30;
 
 /** Fallback anchor used when a user has not configured one yet. */
-export const DEFAULT_BILLING_CYCLE_DAY = 10;
+export const DEFAULT_BILLING_CYCLE_DAY = 5;
 
 export interface CalculateMeterMetricsParams {
   /** Actual meter value logged today (e.g. 4580). */

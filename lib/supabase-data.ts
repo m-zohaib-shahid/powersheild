@@ -84,7 +84,9 @@ export async function getDashboardData(): Promise<DashboardData> {
   /* Mock fallback: not configured, query failed, or table has no rows yet. */
   if (!latestLog || cycleStartReading === null) {
     return {
-      snapshot: DASHBOARD,
+      /* Keep the persisted anchor even while the meter table is still empty,
+         so the cycle banner reflects the user's real billing day. */
+      snapshot: { ...DASHBOARD, billingCycleDay },
       entries: MOCK_READINGS,
       metrics: calculateMeterMetrics({
         currentReading: DASHBOARD.currentReading,

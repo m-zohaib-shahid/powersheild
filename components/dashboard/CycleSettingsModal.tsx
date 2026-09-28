@@ -229,29 +229,7 @@ export default function CycleSettingsModal({
               </div>
             </div>
             {/* Body */}
-            <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-6">
-              {/* Live window preview */}
-              <div className="mb-5 flex items-start gap-3 rounded-xl border border-emerald-600/30 bg-emerald-600/10 p-3.5">
-                <CalendarClock
-                  className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400"
-                  aria-hidden="true"
-                />
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-emerald-400">
-                    Your active cycle
-                  </p>
-                  <p className="mt-1 text-sm text-emerald-100">
-                    <span className="font-semibold">{preview.startShort}</span>
-                    <span className="mx-1.5 text-emerald-400/70">&rarr;</span>
-                    <span className="font-semibold">{preview.endShort}</span>
-                  </p>
-                  <p className="mt-0.5 text-[11px] text-emerald-200/70">
-                    {CYCLE_LENGTH_DAYS}-day window &middot; resets on day{" "}
-                    {selectedDay} of every month
-                  </p>
-                </div>
-              </div>
-
+            <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-6">
               {/* Day grid */}
               <fieldset>
                 <legend className="text-xs font-semibold uppercase tracking-wider text-slate-400">
@@ -274,7 +252,7 @@ export default function CycleSettingsModal({
                         aria-checked={isSelected}
                         onClick={() => setSelectedDay(day)}
                         className={cn(
-                          "relative flex h-10 items-center justify-center rounded-lg border text-sm font-semibold tabular-nums transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60",
+                          "relative flex h-8 items-center justify-center rounded-lg border text-xs font-semibold tabular-nums transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60 sm:h-9 sm:text-sm",
                           isSelected
                             ? "border-emerald-600 bg-emerald-600 text-white shadow-lg shadow-emerald-900/40"
                             : "border-slate-700 bg-slate-900/60 text-slate-300 hover:border-slate-600 hover:bg-slate-700/50 hover:text-white",
@@ -304,18 +282,24 @@ export default function CycleSettingsModal({
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.22 }}
                 aria-live="polite"
-                className="mt-4 rounded-xl border border-slate-700 bg-slate-900/60 px-3.5 py-3 text-center text-xs leading-relaxed text-slate-300"
+                className="mt-3 flex items-center justify-center gap-2 rounded-xl border border-emerald-600/40 bg-emerald-600/10 px-3 py-2.5 text-center text-xs leading-relaxed font-medium text-emerald-100 sm:text-sm"
               >
-                Your cycle will run from{" "}
-                <span className="font-semibold text-emerald-400">
-                  {preview.startShort}
-                </span>{" "}
-                to{" "}
-                <span className="font-semibold text-emerald-400">
-                  {preview.endShort}
-                </span>{" "}
-                <span className="text-slate-400">
-                  ({CYCLE_LENGTH_DAYS} Days)
+                <CalendarClock
+                  className="h-4 w-4 shrink-0 text-emerald-400"
+                  aria-hidden="true"
+                />
+                <span>
+                  Your cycle will run from{" "}
+                  <span className="font-bold text-emerald-300">
+                    {preview.startShort}
+                  </span>{" "}
+                  to{" "}
+                  <span className="font-bold text-emerald-300">
+                    {preview.endShort}
+                  </span>{" "}
+                  <span className="text-emerald-200/80">
+                    ({CYCLE_LENGTH_DAYS} Days)
+                  </span>
                 </span>
               </motion.p>
 

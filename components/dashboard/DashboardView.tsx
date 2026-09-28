@@ -194,7 +194,7 @@ export default function DashboardView({ initialData }: DashboardViewProps) {
                 type="button"
                 onClick={() => setIsCycleSettingsOpen(true)}
                 aria-label={`Change billing cycle start day. Current cycle runs from ${formatReadingDate(metrics.cycleStartDate)} to ${formatReadingDate(metrics.cycleEndDate)}.`}
-                className="inline-flex items-center gap-2 rounded-xl border border-emerald-600/40 bg-emerald-600/10 px-3 py-2.5 text-sm font-semibold text-emerald-300 transition hover:border-emerald-500/60 hover:bg-emerald-600/20 hover:text-emerald-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60"
+                className="inline-flex items-center gap-2 rounded-xl border-2 border-emerald-500/60 bg-emerald-500/15 px-3 py-2 text-sm font-bold text-emerald-200 shadow-lg shadow-emerald-950/50 transition hover:border-emerald-400 hover:bg-emerald-500/25 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
               >
                 <Settings2 className="h-4 w-4" aria-hidden="true" />
                 <span className="hidden sm:inline">

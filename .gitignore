@@ -23,6 +23,10 @@ yarn-error.log*
 # local env files
 .env*.local
 
+# production env (contains Supabase credentials - never commit)
+.env.production
+.env.production.*
+
 # typescript
 *.tsbuildinfo
 

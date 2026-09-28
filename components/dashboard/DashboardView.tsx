@@ -184,18 +184,40 @@ export default function DashboardView({ initialData }: DashboardViewProps) {
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setIsCycleSettingsOpen(true)}
-              aria-label="Change billing cycle start day"
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-600 bg-slate-800 px-3 py-2.5 text-sm font-semibold text-slate-200 transition hover:border-emerald-600/50 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60"
-            >
-              <Settings2 className="h-4 w-4" aria-hidden="true" />
-              <span className="hidden sm:inline">
-                Cycle Day {billingCycleDay}
+            {/*
+              Billing cycle badge - visually distinct from the primary action
+              and self-documenting: a hover/focus tooltip reveals the exact
+              30-day window so the anchor day is never ambiguous.
+            */}
+            <span className="group relative inline-flex">
+              <button
+                type="button"
+                onClick={() => setIsCycleSettingsOpen(true)}
+                aria-label={`Change billing cycle start day. Current cycle runs from ${formatReadingDate(metrics.cycleStartDate)} to ${formatReadingDate(metrics.cycleEndDate)}.`}
+                className="inline-flex items-center gap-2 rounded-xl border border-emerald-600/40 bg-emerald-600/10 px-3 py-2.5 text-sm font-semibold text-emerald-300 transition hover:border-emerald-500/60 hover:bg-emerald-600/20 hover:text-emerald-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60"
+              >
+                <Settings2 className="h-4 w-4" aria-hidden="true" />
+                <span className="hidden sm:inline">
+                  Cycle Day {billingCycleDay}
+                </span>
+                <span className="sm:hidden">{billingCycleDay}</span>
+              </button>
+
+              {/* Tooltip - exact start/end dates for the active window */}
+              <span
+                role="tooltip"
+                className="pointer-events-none absolute right-0 top-full z-50 mt-2 w-max max-w-[16rem] rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-left text-[11px] leading-relaxed text-slate-300 opacity-0 shadow-xl shadow-black/50 transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100"
+              >
+                <span className="block font-semibold text-white">
+                  {formatReadingDate(metrics.cycleStartDate)} &rarr;{" "}
+                  {formatReadingDate(metrics.cycleEndDate)}
+                </span>
+                <span className="mt-0.5 block text-slate-400">
+                  Day {metrics.daysElapsed} of 30 &middot;{" "}
+                  {metrics.daysRemaining} days left
+                </span>
               </span>
-              <span className="sm:hidden">{billingCycleDay}</span>
-            </button>
+            </span>
 
           <button
             type="button"

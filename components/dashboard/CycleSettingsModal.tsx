@@ -4,7 +4,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { CalendarClock, Check, Info, Settings2, X } from "lucide-react";
+import { CalendarClock, Check, Info, Loader2, X } from "lucide-react";
 
 import {
   CYCLE_LENGTH_DAYS,
@@ -50,6 +50,16 @@ function formatIso(iso: string): string {
   const [year, month, day] = iso.split("-").map(Number);
   if (!year || !month || !day) return iso;
   return `${String(day).padStart(2, "0")} ${MONTHS[month - 1]} ${year}`;
+}
+
+/**
+ * Compact "Sep 10" form (no leading zero, no year) used in the inline preview
+ * sentence. Falls back to the full ISO form for malformed input.
+ */
+function formatShort(iso: string): string {
+  const [year, month, day] = iso.split("-").map(Number);
+  if (!year || !month || !day) return iso;
+  return `${MONTHS[month - 1]} ${day}`;
 }
 
 /** Every selectable day, 1-31. */
@@ -119,9 +129,13 @@ export default function CycleSettingsModal({
    */
   const preview = useMemo(() => {
     const now = new Date();
+    const startIso = toIso(getCycleStartDate(selectedDay, now));
+    const endIso = toIso(getCycleEndDate(selectedDay, now));
     return {
-      start: formatIso(toIso(getCycleStartDate(selectedDay, now))),
-      end: formatIso(toIso(getCycleEndDate(selectedDay, now))),
+      startIso,
+      endIso,
+      startShort: formatShort(startIso),
+      endShort: formatShort(endIso),
     };
   }, [selectedDay]);
 
@@ -227,9 +241,9 @@ export default function CycleSettingsModal({
                     Your active cycle
                   </p>
                   <p className="mt-1 text-sm text-emerald-100">
-                    <span className="font-semibold">{preview.start}</span>
+                    <span className="font-semibold">{preview.startShort}</span>
                     <span className="mx-1.5 text-emerald-400/70">&rarr;</span>
-                    <span className="font-semibold">{preview.end}</span>
+                    <span className="font-semibold">{preview.endShort}</span>
                   </p>
                   <p className="mt-0.5 text-[11px] text-emerald-200/70">
                     {CYCLE_LENGTH_DAYS}-day window &middot; resets on day{" "}
@@ -279,6 +293,32 @@ export default function CycleSettingsModal({
                 </div>
               </fieldset>
 
+              {/*
+                Dynamic preview sentence, directly below the day selector.
+                Re-renders on every selection change so the user always sees
+                the exact window the new anchor will produce.
+              */}
+              <motion.p
+                key={`${preview.startIso}-${preview.endIso}`}
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.22 }}
+                aria-live="polite"
+                className="mt-4 rounded-xl border border-slate-700 bg-slate-900/60 px-3.5 py-3 text-center text-xs leading-relaxed text-slate-300"
+              >
+                Your cycle will run from{" "}
+                <span className="font-semibold text-emerald-400">
+                  {preview.startShort}
+                </span>{" "}
+                to{" "}
+                <span className="font-semibold text-emerald-400">
+                  {preview.endShort}
+                </span>{" "}
+                <span className="text-slate-400">
+                  ({CYCLE_LENGTH_DAYS} Days)
+                </span>
+              </motion.p>
+
               {/* Context note */}
               <p className="mt-4 flex items-start gap-2 text-[11px] leading-relaxed text-slate-500">
                 <Info
@@ -323,22 +363,26 @@ export default function CycleSettingsModal({
                   type="button"
                   onClick={handleSave}
                   disabled={isSaving || !isDirty}
+                  /* Communicates the in-flight Server Action to assistive tech. */
+                  aria-busy={isSaving}
                   className={cn(
-                    "flex flex-[1.6] items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400",
-                    isSaving || !isDirty
-                      ? "cursor-not-allowed bg-slate-700 text-slate-400"
-                      : "bg-emerald-600 text-white shadow-lg shadow-emerald-900/40 hover:bg-emerald-500 active:scale-[0.99]",
+                    "relative flex flex-[1.6] items-center justify-center gap-2 overflow-hidden rounded-xl px-4 py-3 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400",
+                    isSaving
+                      ? "cursor-wait bg-emerald-700 text-white"
+                      : isDirty
+                        ? "bg-emerald-600 text-white shadow-lg shadow-emerald-900/40 hover:bg-emerald-500 active:scale-[0.99]"
+                        : "cursor-not-allowed bg-slate-700 text-slate-400",
                   )}
                 >
                   {isSaving ? (
-                    <Settings2
+                    <Loader2
                       className="h-4 w-4 animate-spin"
                       aria-hidden="true"
                     />
                   ) : (
                     <Check className="h-4 w-4" aria-hidden="true" />
                   )}
-                  {isSaving ? "Saving to Supabase..." : "Save Billing Day"}
+                  {isSaving ? "Saving settings..." : "Save Settings"}
                 </button>
               </div>
             </div>

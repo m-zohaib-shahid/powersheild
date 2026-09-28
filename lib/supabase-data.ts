@@ -11,6 +11,7 @@ import {
 import { calculateMeterMetrics, DEFAULT_BILLING_CYCLE_DAY } from "@/lib/burn-rate";
 import { DASHBOARD, MOCK_READINGS } from "@/lib/mock-data";
 import { getDeltaZone } from "@/lib/tariff";
+import { isSupabaseConfigured } from "@/lib/supabase-env";
 import { selectOwnedRows } from "@/lib/user-scope";
 import type {
   DashboardSnapshot,
@@ -128,8 +129,44 @@ export async function getDashboardData(): Promise<DashboardData> {
   const cycleStartReading = baselineResult.ok ? baselineResult.data : null;
   const history = historyResult.ok ? historyResult.data : [];
 
-  /* Mock fallback: not configured, query failed, or table has no rows yet. */
+  /**
+   * Only fall back to mock data when Supabase is genuinely NOT configured.
+   *
+   * Previously ANY failure (a transient error, an RLS denial, an empty table)
+   * silently replaced live data with the hardcoded 180-unit mock snapshot,
+   * which is why production looked "stuck" on demo numbers even with the
+   * environment variables present.
+   *
+   * When Supabase IS configured we surface the real (possibly empty) state so
+   * the UI reflects the database instead of pretending.
+   */
+  const supabaseAvailable = isSupabaseConfigured();
+
   if (!latestLog || cycleStartReading === null) {
+    /* Live but empty: keep the real anchor and show an honest empty state. */
+    if (supabaseAvailable) {
+      return {
+        snapshot: {
+          ...DASHBOARD,
+          currentReading: latestLog?.reading_value ?? DASHBOARD.currentReading,
+          cycleStartReading:
+            cycleStartReading ?? latestLog?.reading_value ?? DASHBOARD.currentReading,
+          billingCycleDay,
+        },
+        entries: history.length > 0 ? mapLogsToEntries(history, cycleStartReading ?? 0) : [],
+        metrics: calculateMeterMetrics({
+          currentReading: latestLog?.reading_value ?? DASHBOARD.currentReading,
+          cycleStartReading:
+            cycleStartReading ?? latestLog?.reading_value ?? DASHBOARD.currentReading,
+          billingCycleDay,
+          targetUnitLimit: targetLimit,
+        }),
+        isLive: true,
+        userId,
+      };
+    }
+
+    /* Genuinely unconfigured (local mock mode / missing env): demo snapshot. */
     return {
       /* Keep the persisted anchor even while the meter table is still empty,
          so the cycle banner reflects the user's real billing day. */

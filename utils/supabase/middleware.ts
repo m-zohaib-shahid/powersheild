@@ -1,8 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+import { getSupabaseEnv } from "@/lib/supabase-env";
 
 /**
  * Middleware-bound Supabase client used only to refresh the auth session.
@@ -20,11 +19,14 @@ export const createClient = (request: NextRequest) => {
     },
   });
 
-  if (!supabaseUrl || !supabaseKey) {
+  /* Resolved at request time (not build time) - see lib/supabase-env.ts. */
+  const { url, key } = getSupabaseEnv();
+
+  if (!url || !key) {
     return supabaseResponse;
   }
 
-  const supabase = createServerClient(supabaseUrl, supabaseKey, {
+  const supabase = createServerClient(url, key, {
     cookies: {
       getAll() {
         return request.cookies.getAll();

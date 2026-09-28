@@ -1,17 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+import { getSupabaseEnv, isSupabaseConfigured } from "@/lib/supabase-env";
 
-/**
- * True when the Supabase project credentials are present in the environment.
- * Lets the app degrade to mock data instead of throwing on an unconfigured
- * local machine or a preview deployment.
- */
-export function isSupabaseConfigured(): boolean {
-  return Boolean(supabaseUrl && supabaseKey);
-}
+export { isSupabaseConfigured };
 
 /**
  * Server-side Supabase client bound to the request cookie store, so the user
@@ -21,13 +13,16 @@ export function isSupabaseConfigured(): boolean {
 export const createClient = (
   cookieStore: Awaited<ReturnType<typeof cookies>>,
 ) => {
-  if (!supabaseUrl || !supabaseKey) {
+  /* Resolved at request time (not build time) - see lib/supabase-env.ts. */
+  const { url, key } = getSupabaseEnv();
+
+  if (!url || !key) {
     throw new Error(
-      "Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY in .env.local.",
+      "Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY in the deployment environment.",
     );
   }
 
-  return createServerClient(supabaseUrl, supabaseKey, {
+  return createServerClient(url, key, {
     cookies: {
       getAll() {
         return cookieStore.getAll();

@@ -3,16 +3,22 @@ import "server-only";
 import {
   getAuthUserId,
   getBillingCycleDay,
-  getCycleStartReading,
+  getCycleBaseline,
   getLatestReading,
   getRecentReadings,
+  type CycleBaseline,
   type MeterLog,
 } from "@/app/actions/meter";
-import { calculateMeterMetrics, DEFAULT_BILLING_CYCLE_DAY } from "@/lib/burn-rate";
+import {
+  calculateMeterMetrics,
+  DEFAULT_BILLING_CYCLE_DAY,
+  getCycleStartDate,
+} from "@/lib/burn-rate";
 import { DASHBOARD, MOCK_READINGS } from "@/lib/mock-data";
 import { getDeltaZone } from "@/lib/tariff";
 import { isSupabaseConfigured } from "@/lib/supabase-env";
 import { selectOwnedRows } from "@/lib/user-scope";
+import { toLocalDateString } from "@/lib/utils";
 import type {
   DashboardSnapshot,
   MeterReadingEntry,
@@ -28,6 +34,62 @@ export interface DashboardData {
   isLive: boolean;
   /** Authenticated caller id, or null for the anonymous demo session. */
   userId: string | null;
+}
+
+/** How the cycle baseline was chosen (surfaced for debugging/UI copy). */
+export type BaselineSource = "cycle-first" | "previous-cycle" | "none";
+
+/** Resolved baseline for the active cycle, with the row it came from. */
+export interface ResolvedBaseline {
+  /** The kWh value consumed-units are measured from. */
+  reading: number;
+  source: BaselineSource;
+  /** ISO date of the log the baseline came from, when one exists. */
+  logDate: string | null;
+}
+
+/**
+ * Applies the baseline fallback chain to the active cycle.
+ *
+ * Priority:
+ *   1. `firstInCycle`    - first log on/after the cycle start (authoritative)
+ *   2. `lastBeforeCycle` - previous cycle's closing reading
+ *   3. `latest`          - most recent reading anywhere (last resort)
+ *   4. `0`               - nothing stored yet
+ *
+ * The engine clamps consumption at 0, so a baseline that somehow sits above
+ * the latest reading can never produce negative units.
+ */
+function resolveBaseline(
+  baseline: CycleBaseline,
+  latest: MeterLog | null,
+  latestValue: number,
+): ResolvedBaseline {
+  if (baseline.firstInCycle) {
+    return {
+      reading: baseline.firstInCycle.reading_value,
+      source: "cycle-first",
+      logDate: baseline.firstInCycle.reading_date,
+    };
+  }
+
+  if (baseline.lastBeforeCycle) {
+    return {
+      reading: baseline.lastBeforeCycle.reading_value,
+      source: "previous-cycle",
+      logDate: baseline.lastBeforeCycle.reading_date,
+    };
+  }
+
+  if (latest) {
+    return {
+      reading: latest.reading_value,
+      source: "none",
+      logDate: latest.reading_date,
+    };
+  }
+
+  return { reading: 0, source: "none", logDate: null };
 }
 
 /**
@@ -113,63 +175,34 @@ async function settle<T>(
 export async function getDashboardData(): Promise<DashboardData> {
   const targetLimit = DASHBOARD.targetLimit;
 
-  /* The user's own billing anchor wins; otherwise fall back to the default. */
+  /* 1. The user's own billing anchor wins; otherwise fall back to the default. */
   const [billingCycleDay, userId] = await Promise.all([
     safeBillingCycleDay(DASHBOARD.billingCycleDay),
     safeUserId(),
   ]);
 
+  /* 2. Resolve the ACTIVE cycle start date for that anchor.
+     e.g. cycle_day = 10, today = Sep 28  ->  cycle starts Sep 10, 2026. */
+  const cycleStartIso = toLocalDateString(
+    getCycleStartDate(billingCycleDay, new Date()),
+  );
+
+  /* 3. Fetch latest reading, baseline candidates and history in parallel. */
   const [latestResult, baselineResult, historyResult] = await Promise.all([
     settle(() => getLatestReading()),
-    settle(() => getCycleStartReading(billingCycleDay)),
+    settle(() => getCycleBaseline(cycleStartIso)),
     settle(() => getRecentReadings(5)),
   ]);
 
   const latestLog = latestResult.ok ? latestResult.data : null;
-  const cycleStartReading = baselineResult.ok ? baselineResult.data : null;
+  const baseline: CycleBaseline = baselineResult.ok
+    ? baselineResult.data
+    : { firstInCycle: null, lastBeforeCycle: null };
   const history = historyResult.ok ? historyResult.data : [];
 
-  /**
-   * Only fall back to mock data when Supabase is genuinely NOT configured.
-   *
-   * Previously ANY failure (a transient error, an RLS denial, an empty table)
-   * silently replaced live data with the hardcoded 180-unit mock snapshot,
-   * which is why production looked "stuck" on demo numbers even with the
-   * environment variables present.
-   *
-   * When Supabase IS configured we surface the real (possibly empty) state so
-   * the UI reflects the database instead of pretending.
-   */
-  const supabaseAvailable = isSupabaseConfigured();
-
-  if (!latestLog || cycleStartReading === null) {
-    /* Live but empty: keep the real anchor and show an honest empty state. */
-    if (supabaseAvailable) {
-      return {
-        snapshot: {
-          ...DASHBOARD,
-          currentReading: latestLog?.reading_value ?? DASHBOARD.currentReading,
-          cycleStartReading:
-            cycleStartReading ?? latestLog?.reading_value ?? DASHBOARD.currentReading,
-          billingCycleDay,
-        },
-        entries: history.length > 0 ? mapLogsToEntries(history, cycleStartReading ?? 0) : [],
-        metrics: calculateMeterMetrics({
-          currentReading: latestLog?.reading_value ?? DASHBOARD.currentReading,
-          cycleStartReading:
-            cycleStartReading ?? latestLog?.reading_value ?? DASHBOARD.currentReading,
-          billingCycleDay,
-          targetUnitLimit: targetLimit,
-        }),
-        isLive: true,
-        userId,
-      };
-    }
-
-    /* Genuinely unconfigured (local mock mode / missing env): demo snapshot. */
+  /* Supabase genuinely unconfigured -> demo snapshot (local mock mode). */
+  if (!isSupabaseConfigured()) {
     return {
-      /* Keep the persisted anchor even while the meter table is still empty,
-         so the cycle banner reflects the user's real billing day. */
       snapshot: { ...DASHBOARD, billingCycleDay },
       entries: MOCK_READINGS,
       metrics: calculateMeterMetrics({
@@ -183,23 +216,47 @@ export async function getDashboardData(): Promise<DashboardData> {
     };
   }
 
+  /* Nothing stored at all: an empty, honest state rather than fake numbers. */
+  if (!latestLog) {
+    return {
+      snapshot: {
+        ...DASHBOARD,
+        currentReading: 0,
+        cycleStartReading: 0,
+        billingCycleDay,
+        lastUpdated: "No readings yet",
+      },
+      entries: [],
+      metrics: calculateMeterMetrics({
+        currentReading: 0,
+        cycleStartReading: 0,
+        billingCycleDay,
+        targetUnitLimit: targetLimit,
+      }),
+      isLive: true,
+      userId,
+    };
+  }
+
+  /* 4. Strict baseline chain, then Delta = latest - baseline. */
   const currentReading = latestLog.reading_value;
+  const resolved = resolveBaseline(baseline, latestLog, currentReading);
 
   return {
     snapshot: {
       currentReading,
-      cycleStartReading,
+      cycleStartReading: resolved.reading,
       billingCycleDay,
       targetLimit,
       lastUpdated: formatLastUpdated(latestLog.reading_date),
     },
     entries: mapLogsToEntries(
       selectOwnedRows(history, userId),
-      cycleStartReading,
+      resolved.reading,
     ),
     metrics: calculateMeterMetrics({
       currentReading,
-      cycleStartReading,
+      cycleStartReading: resolved.reading,
       billingCycleDay,
       targetUnitLimit: targetLimit,
     }),
@@ -207,6 +264,7 @@ export async function getDashboardData(): Promise<DashboardData> {
     userId,
   };
 }
+
 
 /** Human-friendly "Updated ..." label for the gauge card header. */
 function formatLastUpdated(isoDate: string): string {

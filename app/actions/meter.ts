@@ -250,6 +250,82 @@ export async function getMeterSnapshot(
   };
 }
 
+/** The two baseline candidates the dashboard needs for the active cycle. */
+export interface CycleBaseline {
+  /**
+   * FIRST meter log recorded on or after the cycle start date. This is the
+   * true baseline: everything consumed after it belongs to this cycle.
+   * `null` when the cycle has no readings yet.
+   */
+  firstInCycle: MeterLog | null;
+  /**
+   * Most recent meter log recorded BEFORE the cycle start date. Used as a
+   * fallback baseline when the cycle has no readings yet, so the user still
+   * sees a meaningful delta instead of a hard zero.
+   */
+  lastBeforeCycle: MeterLog | null;
+}
+
+/**
+ * Resolves the baseline candidates for the active billing cycle.
+ *
+ * Runs two scoped queries in parallel:
+ *   1. earliest log with `reading_date >= cycleStart`  (the real baseline)
+ *   2. latest  log with `reading_date <  cycleStart`  (fallback)
+ *
+ * The second query is what makes the "no reading this cycle yet" case useful:
+ * the previous cycle's closing reading is the closest true measurement we
+ * have, so consumption can still be reported from it.
+ */
+export async function getCycleBaseline(
+  cycleStartDate: string,
+): Promise<ActionResult<CycleBaseline>> {
+  try {
+    const supabase = await getSupabase();
+    if (!supabase) {
+      return { ok: false, error: "Supabase is not configured." };
+    }
+
+    const userId = await getAuthUserId();
+    const scope = buildUserScopeFilter(userId);
+
+    /* Both queries read the same scoped, date-ascending set. */
+    const base = () => {
+      const query = supabase
+        .from(METER_LOGS_TABLE)
+        .select(LOG_COLUMNS)
+        .order("reading_date", { ascending: true })
+        .order("created_at", { ascending: true });
+
+      return scope ? query.or(scope) : query;
+    };
+
+    const [inCycle, beforeCycle] = await Promise.all([
+      base().gte("reading_date", cycleStartDate).limit(1),
+      base().lt("reading_date", cycleStartDate).limit(1),
+    ]);
+
+    if (inCycle.error) return { ok: false, error: inCycle.error.message };
+    if (beforeCycle.error) {
+      return { ok: false, error: beforeCycle.error.message };
+    }
+
+    return {
+      ok: true,
+      data: {
+        firstInCycle: (inCycle.data?.[0] as MeterLog | undefined) ?? null,
+        lastBeforeCycle: (beforeCycle.data?.[0] as MeterLog | undefined) ?? null,
+      },
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "Unknown error.",
+    };
+  }
+}
+
+
 /**
  * Most recent raw readings (newest first) for the dashboard history list.
  * Deltas are derived per row by comparing against the preceding (older)

@@ -6,6 +6,7 @@ import { useMemo, useState, useTransition } from "react";
 import { motion } from "framer-motion";
 import { Plus, Info, TriangleAlert, CircleCheck, Settings2 } from "lucide-react";
 
+import ConsumptionChart from "@/components/dashboard/ConsumptionChart";
 import GaugeMeter from "@/components/dashboard/GaugeMeter";
 import KpiCards from "@/components/dashboard/KpiCards";
 import RecentLogs from "@/components/dashboard/RecentLogs";
@@ -253,6 +254,16 @@ export default function DashboardView({ initialData }: DashboardViewProps) {
             Add Reading
           </button>
           </div>
+
+          {/* Mobile: inline CTA so the hero is actionable on every screen */}
+          <button
+            type="button"
+            onClick={() => setIsModalOpen(true)}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-fab transition hover:bg-emerald-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 md:hidden"
+          >
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Add Reading
+          </button>
         </div>
 
         {/* Save feedback banner */}
@@ -372,20 +383,29 @@ export default function DashboardView({ initialData }: DashboardViewProps) {
             <KpiCards metrics={metrics} />
           </section>
 
-          {/* Reading history */}
-          <RecentLogs entries={entries} className="lg:col-span-12" />
-
-          {/* Manageable logbook: edit/delete per row (Phase 2 wiring) */}
-          <RecentReadingsTable
+          {/* SECTION 3 - ANALYTICS & INSIGHTS */}
+          <ConsumptionChart
             entries={entries}
-            baselineId={baselineEntryId}
-            onAdd={() => setIsModalOpen(true)}
-            onEdit={handleEditReading}
-            onDelete={handleDeleteReading}
-            className="lg:col-span-12"
+            targetLimit={initialData.snapshot.targetLimit}
+            unitsConsumed={metrics.unitsConsumed}
+            className="lg:col-span-7"
           />
+
+          {/* Compact reading history list */}
+          <RecentLogs entries={entries} className="lg:col-span-5" />
         </div>
       </main>
+
+      {/* SECTION 4 - BOTTOM UTILITY: LOG MANAGEMENT */}
+      <div className="mx-auto w-full max-w-6xl px-4 pb-32 sm:px-6 md:pb-16 lg:px-8">
+        <RecentReadingsTable
+          entries={entries}
+          baselineId={baselineEntryId}
+          onAdd={() => setIsModalOpen(true)}
+          onEdit={handleEditReading}
+          onDelete={handleDeleteReading}
+        />
+      </div>
 
       {/* Sticky mobile floating action button */}
       <motion.button

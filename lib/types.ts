@@ -73,6 +73,12 @@ export interface MeterReadingEntry {
   id: string;
   /** ISO calendar date in YYYY-MM-DD format. */
   date: string;
+  /**
+   * Optional ISO timestamp the reading was logged (used by
+   * `RecentReadingsTable` for the "Sep 28, 2026 - 08:30 PM" label). Absent
+   * for older rows, which fall back to the date alone.
+   */
+  loggedAt?: string;
   /** Cumulative meter index at the time of the reading. */
   reading: number;
   /** Units burned since the previous reading. */

@@ -9,6 +9,7 @@ import { Plus, Info, TriangleAlert, CircleCheck, Settings2 } from "lucide-react"
 import GaugeMeter from "@/components/dashboard/GaugeMeter";
 import KpiCards from "@/components/dashboard/KpiCards";
 import RecentLogs from "@/components/dashboard/RecentLogs";
+import RecentReadingsTable from "@/components/dashboard/RecentReadingsTable";
 import Header from "@/components/layout/Header";
 import AddReadingModal from "@/components/meter/AddReadingModal";
 
@@ -148,6 +149,30 @@ export default function DashboardView({ initialData }: DashboardViewProps) {
 
   const zoneMeta = ZONE_META[metrics.zone];
   const remaining = initialData.snapshot.targetLimit - metrics.unitsConsumed;
+
+  /**
+   * Id of the row that anchors the active cycle. Entries arrive newest-first,
+   * so the last item is the baseline the delta is measured from.
+   */
+  const baselineEntryId =
+    entries.length > 0 ? entries[entries.length - 1].id : null;
+
+  /**
+   * Phase 2 hook: edit is a no-op until the update server action lands, but the
+   * UI stays fully exercisable in the meantime.
+   */
+  function handleEditReading(entry: MeterReadingEntry): void {
+    console.info("[PowerShield] edit reading (Phase 2)", entry.id, entry.reading);
+  }
+
+  /**
+   * Phase 2 hook: removes the row from local state so the gauge, KPIs and both
+   * tables re-derive from the new baseline immediately. Once the delete server
+   * action exists this becomes an optimistic update + `router.refresh()`.
+   */
+  async function handleDeleteReading(entry: MeterReadingEntry): Promise<void> {
+    setEntries((previous) => previous.filter((item) => item.id !== entry.id));
+  }
 
   /* Zone-aware styling for the projection callout. */
   const alertTone =
@@ -349,6 +374,16 @@ export default function DashboardView({ initialData }: DashboardViewProps) {
 
           {/* Reading history */}
           <RecentLogs entries={entries} className="lg:col-span-12" />
+
+          {/* Manageable logbook: edit/delete per row (Phase 2 wiring) */}
+          <RecentReadingsTable
+            entries={entries}
+            baselineId={baselineEntryId}
+            onAdd={() => setIsModalOpen(true)}
+            onEdit={handleEditReading}
+            onDelete={handleDeleteReading}
+            className="lg:col-span-12"
+          />
         </div>
       </main>
 
